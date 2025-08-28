@@ -1,0 +1,29 @@
+version: "3.9"
+services:
+  web:
+    build: .
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+    ports:
+      - "8000:8000"
+  worker:
+    build: .
+    command: celery -A app.celery_app.celery_app worker -l info
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"

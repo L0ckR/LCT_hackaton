@@ -1,0 +1,4 @@
+[
+  {"product": "card", "text": "great card", "date": "2023-01-01T00:00:00"},
+  {"product": "loan", "text": "bad loan", "date": "2023-01-02T00:00:00"}
+]
