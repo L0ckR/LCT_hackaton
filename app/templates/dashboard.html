@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Review Analytics{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>Welcome, {{ user.email }}</h2>
+  <div class="overview-grid">
+    <div>
+      <p class="overview-label">Total reviews</p>
+      <p class="overview-value" id="overview-total">{{ overview.total_reviews }}</p>
+    </div>
+    <div>
+      <p class="overview-label">Average sentiment</p>
+      <p class="overview-value" id="overview-average">{{ overview.average_sentiment }}</p>
+    </div>
+    <div class="overview-highlights" id="overview-highlights">
+      <p class="overview-label">Latest highlights</p>
+      <ul id="overview-highlights-list" class="{% if not overview.highlights %}hidden{% endif %}">
+        {% for highlight in overview.highlights %}
+        <li>{{ highlight }}</li>
+        {% endfor %}
+      </ul>
+      <p class="hint {% if overview.highlights %}hidden{% endif %}" id="overview-highlights-empty">No highlights yet.</p>
+    </div>
+  </div>
+  <div class="dashboard-actions">
+    <form method="post" action="/upload" enctype="multipart/form-data" class="upload-form">
+      <label class="file-input">
+        <span>Upload reviews (JSON or CSV)</span>
+        <input type="file" name="file" accept=".json,.csv" required />
+      </label>
+      <button type="submit">Import</button>
+    </form>
+    <form method="post" action="/widgets" class="widget-form">
+      <div>
+        <label>Title<input type="text" name="title" required placeholder="Widget title" /></label>
+      </div>
+      <div>
+        <label>Metric
+          <select name="metric" required>
+            {% for key, label in available_metrics.items() %}
+            <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div>
+        <label>Visualization
+          <select name="visualization" required>
+            {% for key, label in available_visualizations.items() %}
+            <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <button type="submit">Add Widget</button>
+    </form>
+  </div>
+</section>
+
+<section class="widget-grid">
+  {% if widgets %}
+    {% for widget in widgets %}
+    <article class="widget-card" data-widget-id="{{ widget.id }}" data-metric="{{ widget.metric }}" data-visualization="{{ widget.visualization }}">
+      <header>
+        <h3>{{ widget.title }}</h3>
+        <form method="post" action="/widgets/{{ widget.id }}/delete">
+          <button type="submit" class="link-button" title="Remove widget">×</button>
+        </form>
+      </header>
+      <p class="widget-metric">{{ widget.label }}</p>
+      {% if widget.visualization == 'metric' %}
+      <p class="widget-value">{{ '%.0f'|format(widget.value) }}</p>
+      {% else %}
+      <canvas class="widget-chart" aria-label="{{ widget.title }} chart"></canvas>
+      {% endif %}
+    </article>
+    {% endfor %}
+  {% else %}
+  <div class="card">
+    <p class="hint">No widgets yet. Use the form above to add insights.</p>
+  </div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h3>Recent reviews</h3>
+  {% if reviews %}
+  <table class="reviews">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Product</th>
+        <th>Sentiment</th>
+        <th>Date</th>
+        <th>Excerpt</th>
+      </tr>
+    </thead>
+    <tbody id="recent-reviews-body">
+      {% for review in reviews %}
+      <tr>
+        <td>{{ review.id }}</td>
+        <td>{{ review.product or '—' }}</td>
+        <td>{{ review.sentiment or 'pending' }}</td>
+        <td>{{ review.date.strftime('%Y-%m-%d %H:%M') if review.date else 'n/a' }}</td>
+        <td>{{ review.text[:120] }}{% if review.text|length > 120 %}…{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="hint">No reviews yet. Import data above to get started.</p>
+  {% endif %}
+</section>
+
+<div id="flash-data" data-status="{{ status or '' }}" data-error="{{ error or '' }}" data-job="{{ request.query_params.get('job', '') }}"></div>
+<div id="auth-data" data-token="{{ auth_token or '' }}"></div>
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+<div id="loading-overlay" class="loading-overlay hidden" aria-hidden="true">
+  <div class="spinner"></div>
+  <p>Processing…</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="/static/dashboard.js" defer></script>
+{% endblock %}

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from typing import Optional
 
@@ -9,6 +9,9 @@ class ReviewBase(BaseModel):
     date: datetime
     sentiment: Optional[str] = None
     cluster: Optional[str] = None
+    sentiment_score: Optional[float] = None
+    sentiment_summary: Optional[str] = None
+    insights: Optional[dict] = None
 
 
 class ReviewCreate(BaseModel):
@@ -20,5 +23,4 @@ class ReviewCreate(BaseModel):
 class ReviewOut(ReviewBase):
     id: int
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
