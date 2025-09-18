@@ -115,9 +115,11 @@
 <div id="flash-data" data-status="{{ status or '' }}" data-error="{{ error or '' }}" data-job="{{ request.query_params.get('job', '') }}"></div>
 <div id="auth-data" data-token="{{ auth_token or '' }}"></div>
 <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-<div id="loading-overlay" class="loading-overlay hidden" aria-hidden="true">
+<div id="job-status" class="job-indicator hidden" aria-live="polite">
   <div class="spinner"></div>
-  <p>Processing…</p>
+  <div>
+    <p id="job-status-message">Processing…</p>
+  </div>
 </div>
 {% endblock %}
 

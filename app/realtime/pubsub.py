@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from redis import Redis
 from redis.asyncio import from_url as async_redis_from_url
@@ -14,11 +14,16 @@ CHANNEL = "dashboard_events"
 
 
 def publish_event_sync(message: dict) -> None:
+    client = None
     try:
         client = Redis.from_url(settings.REDIS_URL)
         client.publish(CHANNEL, json.dumps(message))
     except Exception:  # pragma: no cover - defensive
         logger.exception("Failed to publish realtime event")
+    finally:
+        if client is not None:
+            with suppress(Exception):
+                client.close()
 
 
 @asynccontextmanager
@@ -29,8 +34,8 @@ async def redis_pubsub():
         await pubsub.subscribe(CHANNEL)
         yield pubsub
     finally:
-        await pubsub.close()
-        await client.close()
+        await pubsub.aclose()
+        await client.aclose()
 
 
 async def start_pubsub_listener() -> None:

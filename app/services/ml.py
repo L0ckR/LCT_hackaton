@@ -1,16 +1,32 @@
 import json
 import logging
 import re
+import time
 from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional
 
+from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 from openai import OpenAI
-from openai import APIConnectionError
+from pydantic import BaseModel, Field, ValidationError
 from textblob import TextBlob
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class SentimentPayload(BaseModel):
+    sentiment: str
+    sentiment_score: Optional[float] = None
+    summary: Optional[str] = None
+    highlights: List[str] = Field(default_factory=list)
+
+    @staticmethod
+    def clean(data: Dict[str, Any]) -> "SentimentPayload":
+        payload = SentimentPayload.model_validate(data)
+        if payload.sentiment not in {"positive", "negative", "neutral"}:
+            raise ValidationError([{"loc": ("sentiment",), "msg": "invalid label", "type": "value_error"}], SentimentPayload)
+        return payload
 
 
 @lru_cache(maxsize=1)
@@ -112,51 +128,60 @@ def analyze_text(text: str, *, embedding: Optional[List[float]] = None) -> Dict[
             logger.exception("Embedding generation failed; continuing without embeddings")
             local_embedding = None
 
-    try:
-        prompt = (
-            "You are an analyst for banking customer feedback. "
-            "Summarize the sentiment of the review below and respond strictly as JSON with keys "
-            "sentiment (one of positive, negative, neutral), sentiment_score (float from -1 to 1), "
-            "summary (<=40 words), highlights (list of short bullet strings).\n\n"
-            f"Review: "
-            f"""{text}"""
-        )
-        completion = client.chat.completions.create(
-            model=settings.FOUNDATION_CHAT_MODEL,
-            max_tokens=500,
-            temperature=0.3,
-            top_p=0.9,
-            presence_penalty=0,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        content = completion.choices[0].message.content
-        data = _parse_model_response(content)
-        sentiment = data.get("sentiment")
-        score = data.get("sentiment_score")
-        summary = data.get("summary")
-        highlights = data.get("highlights") or []
-        if isinstance(summary, (list, dict)):
-            summary = json.dumps(summary)
-        if not isinstance(highlights, list):
-            highlights = [str(highlights)] if highlights else []
-        if sentiment not in {"positive", "negative", "neutral"}:
-            raise ValueError("Invalid sentiment label")
-        return {
-            "sentiment": sentiment,
-            "sentiment_score": float(score) if score is not None else None,
-            "summary": summary,
-            "embedding": local_embedding,
-            "highlights": highlights,
-        }
-    except APIConnectionError:
-        logger.warning("Chat completion request failed due to connection error; using fallback")
-        result = _fallback_analysis(text)
-        if local_embedding is not None:
-            result["embedding"] = local_embedding
-        return result
-    except Exception:
-        logger.exception("Chat completion sentiment analysis failed; using fallback")
-        result = _fallback_analysis(text)
-        if local_embedding is not None:
-            result["embedding"] = local_embedding
-        return result
+    last_error: Optional[Exception] = None
+    prompt = (
+        "You are an analyst for banking customer feedback. "
+        "Summarize the sentiment of the review below and respond strictly as JSON with keys "
+        "sentiment (one of positive, negative, neutral), sentiment_score (float from -1 to 1), "
+        "summary (<=40 words), highlights (list of short bullet strings).\n\n"
+        f"Review: "
+        f"""{text}"""
+    )
+    for attempt in range(max(1, settings.FOUNDATION_CHAT_RETRIES)):
+        try:
+            completion = client.chat.completions.create(
+                model=settings.FOUNDATION_CHAT_MODEL,
+                max_tokens=500,
+                temperature=0.3,
+                top_p=0.9,
+                presence_penalty=0,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            content = completion.choices[0].message.content
+            raw = _parse_model_response(content)
+            payload = SentimentPayload.clean(raw)
+            summary = payload.summary
+            if isinstance(summary, (list, dict)):
+                summary = json.dumps(summary)
+            return {
+                "sentiment": payload.sentiment,
+                "sentiment_score": payload.sentiment_score,
+                "summary": summary,
+                "embedding": local_embedding,
+                "highlights": payload.highlights,
+            }
+        except (APIConnectionError, APITimeoutError, APIStatusError, RateLimitError) as exc:
+            last_error = exc
+            delay = settings.FOUNDATION_CHAT_BACKOFF_SECONDS * (attempt + 1)
+            logger.warning(
+                "Chat completion attempt %s failed (%s). Retrying in %.2fs",
+                attempt + 1,
+                exc.__class__.__name__,
+                delay,
+            )
+            time.sleep(delay)
+            continue
+        except ValidationError as exc:
+            logger.warning("Invalid LLM payload structure: %s", exc)
+            break
+        except Exception as exc:
+            last_error = exc
+            logger.exception("Chat completion sentiment analysis failed")
+            break
+
+    if last_error and not isinstance(last_error, ValidationError):
+        logger.warning("Falling back to heuristic sentiment due to LLM error: %s", last_error)
+    result = _fallback_analysis(text)
+    if local_embedding is not None:
+        result["embedding"] = local_embedding
+    return result

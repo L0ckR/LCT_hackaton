@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     FOUNDATION_CHAT_MODEL: str = "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"
     FOUNDATION_EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-0.6B"
     FOUNDATION_EMBEDDING_BATCH_SIZE: int = 16
+    FOUNDATION_CHAT_RETRIES: int = 3
+    FOUNDATION_CHAT_BACKOFF_SECONDS: float = 0.75
 
     model_config = SettingsConfigDict(env_file=".env")
 

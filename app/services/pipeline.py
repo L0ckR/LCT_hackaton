@@ -3,7 +3,6 @@ import logging
 from typing import Iterable, List, Optional
 
 from app.core.config import settings
-from app.realtime import publish_event
 from app.services.embeddings import batcher
 from app.services.ml import analyze_text, generate_embeddings
 
@@ -34,5 +33,4 @@ async def process_reviews(texts: Iterable[str]) -> List[dict]:
     for text, embedding in zip(texts, embeddings):
         result = analyze_text(text, embedding=embedding)
         analyses.append(result)
-    await publish_event({"type": "analysis_completed", "count": len(analyses)})
     return analyses

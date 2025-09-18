@@ -1,5 +1,7 @@
 const chartRegistry = {};
 const pendingJobs = new Map();
+const jobIndicator = document.getElementById('job-status');
+const jobIndicatorMessage = document.getElementById('job-status-message');
 
 function showToast(message, variant = 'success') {
   if (!message) return;
@@ -21,25 +23,21 @@ function showToast(message, variant = 'success') {
 }
 
 function setOverlayMessage(message) {
-  const overlay = document.getElementById('loading-overlay');
-  if (!overlay) return;
-  const text = overlay.querySelector('p');
-  if (text) {
-    text.textContent = message || 'Processing…';
-  }
+  if (!jobIndicatorMessage) return;
+  jobIndicatorMessage.textContent = message || 'Processing…';
 }
 
-function showOverlay(message) {
-  const overlay = document.getElementById('loading-overlay');
-  if (!overlay) return;
+function showJobStatus(message) {
+  if (!jobIndicator) return;
   setOverlayMessage(message);
-  overlay.classList.remove('hidden');
+  jobIndicator.classList.remove('hidden');
 }
 
-function hideOverlay() {
-  const overlay = document.getElementById('loading-overlay');
-  if (!overlay) return;
-  overlay.classList.add('hidden');
+function hideJobStatus(force = false) {
+  if (!jobIndicator) return;
+  if (force || pendingJobs.size === 0) {
+    jobIndicator.classList.add('hidden');
+  }
 }
 
 function initFlashMessages() {
@@ -54,7 +52,7 @@ function initFlashMessages() {
 
   if (job) {
     pendingJobs.set(job, { processed: 0, total: null });
-    showOverlay('Import started…');
+    showJobStatus('Import started…');
   }
 
   if (status || error || job) {
@@ -68,10 +66,10 @@ function initFlashMessages() {
   }
 }
 
-function attachOverlayToForms(selector, message) {
+function attachJobStatusToForms(selector, message) {
   document.querySelectorAll(selector).forEach((form) => {
     form.addEventListener('submit', () => {
-      showOverlay(message);
+      showJobStatus(message);
     });
   });
 }
@@ -183,9 +181,10 @@ function refreshOverview(authToken) {
       }
     : {};
 
-  fetch('/analytics/overview', {
+  fetch(`/analytics/overview?ts=${Date.now()}`, {
     credentials: 'include',
     headers,
+    cache: 'no-store',
   })
     .then((response) => {
       if (!response.ok) {
@@ -233,9 +232,10 @@ function refreshRecentReviews(authToken) {
       }
     : {};
 
-  fetch('/reviews/recent', {
+  fetch(`/reviews/recent?ts=${Date.now()}`, {
     credentials: 'include',
     headers,
+    cache: 'no-store',
   })
     .then((response) => {
       if (!response.ok) {
@@ -276,9 +276,7 @@ function connectDashboardSocket(authToken) {
         refreshOverview(authToken);
         refreshAllCharts(authToken);
         refreshRecentReviews(authToken);
-        if (pendingJobs.size === 0) {
-          hideOverlay();
-        }
+        hideJobStatus();
       }
       if (message.type === 'import_progress') {
         const { job_id: jobId, processed = 0, total = null } = message;
@@ -287,14 +285,12 @@ function connectDashboardSocket(authToken) {
         }
         const totalSafe = total ?? '?';
         setOverlayMessage(`Processing reviews… ${processed}/${totalSafe}`);
-        showOverlay();
+        showJobStatus();
       }
       if (message.type === 'import_completed') {
         if (!message.job_id || pendingJobs.has(message.job_id)) {
           if (message.job_id) pendingJobs.delete(message.job_id);
-          if (pendingJobs.size === 0) {
-            hideOverlay();
-          }
+          hideJobStatus();
           const count = message.count ?? 0;
           showToast(`Imported ${count} reviews.`, 'success');
         }
@@ -314,14 +310,12 @@ function connectDashboardSocket(authToken) {
 }
 
 function initDashboard() {
-  hideOverlay();
+  hideJobStatus(true);
   initFlashMessages();
   const authNode = document.getElementById('auth-data');
   const authToken = authNode ? authNode.dataset.token || '' : '';
 
-  attachOverlayToForms('.upload-form', 'Importing reviews…');
-  attachOverlayToForms('.widget-form', 'Saving widget…');
-  attachOverlayToForms('form[action*="/widgets/"]', 'Updating dashboard…');
+  attachJobStatusToForms('.upload-form', 'Importing reviews…');
 
   refreshOverview(authToken);
   refreshAllCharts(authToken);
@@ -331,7 +325,7 @@ function initDashboard() {
   setInterval(() => {
     refreshRecentReviews(authToken);
     refreshOverview(authToken);
-  }, 15000);
+  }, 5000);
 }
 
 document.addEventListener('DOMContentLoaded', initDashboard);
