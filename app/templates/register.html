@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Register · Review Analytics{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>Create account</h2>
+  {% if error %}
+  <div class="alert alert-error">{{ error }}</div>
+  {% endif %}
+  <form method="post" action="/register" class="form-grid">
+    <label>Email<input type="email" name="email" required /></label>
+    <label>Password<input type="password" name="password" required minlength="6" /></label>
+    <button type="submit">Register</button>
+  </form>
+  <p class="hint">Already have an account? <a href="/login">Sign in</a>.</p>
+</section>
+{% endblock %}
