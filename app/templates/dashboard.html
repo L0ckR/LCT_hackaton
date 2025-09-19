@@ -84,7 +84,6 @@
 
 <section class="card">
   <h3>Recent reviews</h3>
-  {% if reviews %}
   <table class="reviews">
     <thead>
       <tr>
@@ -107,8 +106,9 @@
       {% endfor %}
     </tbody>
   </table>
-  {% else %}
-  <p class="hint">No reviews yet. Import data above to get started.</p>
+  
+  {% if not reviews %}
+  <p class="hint" id="recent-reviews-empty">No reviews yet. Import data above to get started.</p>
   {% endif %}
 </section>
 

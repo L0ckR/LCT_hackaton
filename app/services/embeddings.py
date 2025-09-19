@@ -3,7 +3,7 @@ import logging
 from typing import Iterable, List, Optional
 
 from app.core.config import settings
-from app.services.ml import generate_embeddings
+from app.services.ml import generate_embeddings_async
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class EmbeddingBatcher:
             if not batch:
                 continue
             try:
-                embeddings = generate_embeddings(batch)
+                embeddings = await generate_embeddings_async(batch)
             except Exception:
                 logger.exception("Embedding batch failed")
                 embeddings = [None] * len(batch)

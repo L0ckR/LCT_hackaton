@@ -1,16 +1,15 @@
+import asyncio
 import json
 import logging
 import re
-import time
-from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
-from openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError
 from textblob import TextBlob
 
 from app.core.config import settings
+from app.services.openai_client import create_chat_completion, create_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -25,21 +24,21 @@ class SentimentPayload(BaseModel):
     def clean(data: Dict[str, Any]) -> "SentimentPayload":
         payload = SentimentPayload.model_validate(data)
         if payload.sentiment not in {"positive", "negative", "neutral"}:
-            raise ValidationError([{"loc": ("sentiment",), "msg": "invalid label", "type": "value_error"}], SentimentPayload)
+            raise ValidationError(
+                [
+                    {
+                        "loc": ("sentiment",),
+                        "msg": "invalid label",
+                        "type": "value_error",
+                    }
+                ],
+                SentimentPayload,
+            )
         return payload
 
 
-@lru_cache(maxsize=1)
-def _get_client() -> Optional[OpenAI]:
-    api_key = settings.FOUNDATION_API_KEY
-    if not api_key:
-        logger.info("Foundation API key not configured; falling back to TextBlob sentiment")
-        return None
-    try:
-        return OpenAI(api_key=api_key, base_url=settings.FOUNDATION_API_BASE_URL)
-    except Exception:  # pragma: no cover - defensive
-        logger.exception("Failed to initialize OpenAI client, falling back to TextBlob")
-        return None
+def _llm_available() -> bool:
+    return bool(settings.FOUNDATION_API_KEY)
 
 
 def _fallback_analysis(text: str) -> Dict[str, Any]:
@@ -64,7 +63,6 @@ def _parse_model_response(content: str) -> Dict[str, Any]:
     if not content:
         raise ValueError("Empty response")
     stripped = content.strip()
-    # Remove common code fences like ```json ... ```
     if stripped.startswith("```"):
         stripped = re.sub(r"^```[a-zA-Z0-9]*", "", stripped)
         stripped = re.sub(r"```$", "", stripped).strip()
@@ -82,12 +80,11 @@ def _parse_model_response(content: str) -> Dict[str, Any]:
     raise ValueError("Unable to parse JSON sentiment response")
 
 
-def generate_embeddings(texts: Iterable[str]) -> List[Optional[List[float]]]:
+async def generate_embeddings_async(texts: Iterable[str]) -> List[Optional[List[float]]]:
     texts = list(texts)
     if not texts:
         return []
-    client = _get_client()
-    if not client:
+    if not _llm_available():
         return [None] * len(texts)
 
     batch_size = max(1, settings.FOUNDATION_EMBEDDING_BATCH_SIZE)
@@ -95,10 +92,15 @@ def generate_embeddings(texts: Iterable[str]) -> List[Optional[List[float]]]:
     try:
         for start in range(0, len(texts), batch_size):
             chunk = texts[start : start + batch_size]
-            response = client.embeddings.create(
-                model=settings.FOUNDATION_EMBEDDING_MODEL,
-                input=chunk,
-            )
+            try:
+                response = await create_embeddings(
+                    model=settings.FOUNDATION_EMBEDDING_MODEL,
+                    input=chunk,
+                )
+            except Exception:
+                logger.exception("Embedding batch failed; continuing without vectors")
+                embeddings.extend([None] * len(chunk))
+                continue
             ordered = sorted(response.data, key=lambda item: item.index)
             embeddings.extend([item.embedding for item in ordered])
     except Exception:
@@ -111,40 +113,56 @@ def generate_embeddings(texts: Iterable[str]) -> List[Optional[List[float]]]:
     return embeddings
 
 
-def analyze_text(text: str, *, embedding: Optional[List[float]] = None) -> Dict[str, Any]:
-    client = _get_client()
-    if not client:
+async def analyze_text_async(
+    text: str, *, embedding: Optional[List[float]] = None
+) -> Dict[str, Any]:
+    if not _llm_available():
         return _fallback_analysis(text)
 
     local_embedding = embedding
     if local_embedding is None:
-        try:
-            embed_response = client.embeddings.create(
-                model=settings.FOUNDATION_EMBEDDING_MODEL,
-                input=[text],
-            )
-            local_embedding = embed_response.data[0].embedding
-        except Exception:
-            logger.exception("Embedding generation failed; continuing without embeddings")
-            local_embedding = None
+        vectors = await generate_embeddings_async([text])
+        local_embedding = vectors[0] if vectors else None
 
     last_error: Optional[Exception] = None
     prompt = (
-        "You are an analyst for banking customer feedback. "
-        "Summarize the sentiment of the review below and respond strictly as JSON with keys "
-        "sentiment (one of positive, negative, neutral), sentiment_score (float from -1 to 1), "
-        "summary (<=40 words), highlights (list of short bullet strings).\n\n"
-        f"Review: "
+        "Ты аналитик, изучающий отзывы клиентов банка. "
+        "Проанализируй текст ниже и верни строго JSON со следующими полями: "
+        "sentiment (одно из значений: positive, negative, neutral), "
+        "sentiment_score (число от -1 до 1), summary (краткое описание до 40 слов), "
+        "highlights (список из ключевых тезисов, короткие строки).\n\n"
+        f"Отзыв: "
         f"""{text}"""
     )
-    for attempt in range(max(1, settings.FOUNDATION_CHAT_RETRIES)):
+
+    schema = {
+        "name": "sentiment_payload",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "sentiment": {"type": "string"},
+                "sentiment_score": {"type": ["number", "null"]},
+                "summary": {"type": ["string", "null"]},
+                "highlights": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["sentiment"],
+            "additionalProperties": False,
+        },
+    }
+
+    retries = max(1, settings.FOUNDATION_CHAT_RETRIES)
+    for attempt in range(retries):
         try:
-            completion = client.chat.completions.create(
+            completion = await create_chat_completion(
                 model=settings.FOUNDATION_CHAT_MODEL,
                 max_tokens=500,
                 temperature=0.3,
                 top_p=0.9,
                 presence_penalty=0,
+                response_format={"type": "json_schema", "json_schema": schema},
                 messages=[{"role": "user", "content": prompt}],
             )
             content = completion.choices[0].message.content
@@ -169,7 +187,7 @@ def analyze_text(text: str, *, embedding: Optional[List[float]] = None) -> Dict[
                 exc.__class__.__name__,
                 delay,
             )
-            time.sleep(delay)
+            await asyncio.sleep(delay)
             continue
         except ValidationError as exc:
             logger.warning("Invalid LLM payload structure: %s", exc)
@@ -180,8 +198,14 @@ def analyze_text(text: str, *, embedding: Optional[List[float]] = None) -> Dict[
             break
 
     if last_error and not isinstance(last_error, ValidationError):
-        logger.warning("Falling back to heuristic sentiment due to LLM error: %s", last_error)
+        logger.warning(
+            "Falling back to heuristic sentiment due to LLM error: %s", last_error
+        )
     result = _fallback_analysis(text)
     if local_embedding is not None:
         result["embedding"] = local_embedding
     return result
+
+
+def analyze_text(text: str, *, embedding: Optional[List[float]] = None) -> Dict[str, Any]:
+    return asyncio.run(analyze_text_async(text, embedding=embedding))

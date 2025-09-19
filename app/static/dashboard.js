@@ -22,14 +22,16 @@ function showToast(message, variant = 'success') {
   }, 4200);
 }
 
-function setOverlayMessage(message) {
+function setJobMessage(message) {
   if (!jobIndicatorMessage) return;
-  jobIndicatorMessage.textContent = message || 'Processing…';
+  jobIndicatorMessage.textContent = message || 'Обработка…';
 }
 
 function showJobStatus(message) {
   if (!jobIndicator) return;
-  setOverlayMessage(message);
+  if (message) {
+    setJobMessage(message);
+  }
   jobIndicator.classList.remove('hidden');
 }
 
@@ -44,15 +46,13 @@ function initFlashMessages() {
   const flashNode = document.getElementById('flash-data');
   if (!flashNode) return;
   const { status, error, job } = flashNode.dataset;
-  if (error) {
+  if (job) {
+    pendingJobs.set(job, { processed: 0, total: null });
+    showJobStatus('Импорт запущен…');
+  } else if (error) {
     showToast(error, 'error');
   } else if (status) {
     showToast(status, 'success');
-  }
-
-  if (job) {
-    pendingJobs.set(job, { processed: 0, total: null });
-    showJobStatus('Import started…');
   }
 
   if (status || error || job) {
@@ -244,8 +244,11 @@ function refreshRecentReviews(authToken) {
       return response.json();
     })
     .then((data) => {
+      const emptyHandler = document.getElementById('recent-reviews-empty')
       const tbody = document.getElementById('recent-reviews-body');
       if (!tbody) return;
+      
+      emptyHandler.style.visibility = "hidden";
       tbody.innerHTML = '';
       data.forEach((review) => {
         const row = document.createElement('tr');
@@ -284,7 +287,7 @@ function connectDashboardSocket(authToken) {
           pendingJobs.set(jobId, { processed, total });
         }
         const totalSafe = total ?? '?';
-        setOverlayMessage(`Processing reviews… ${processed}/${totalSafe}`);
+        setJobMessage(`Обработка отзывов… ${processed}/${totalSafe}`);
         showJobStatus();
       }
       if (message.type === 'import_completed') {
@@ -315,7 +318,7 @@ function initDashboard() {
   const authNode = document.getElementById('auth-data');
   const authToken = authNode ? authNode.dataset.token || '' : '';
 
-  attachJobStatusToForms('.upload-form', 'Importing reviews…');
+  attachJobStatusToForms('.upload-form', 'Загрузка отзывов…');
 
   refreshOverview(authToken);
   refreshAllCharts(authToken);

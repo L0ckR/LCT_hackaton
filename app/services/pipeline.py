@@ -2,9 +2,8 @@ import asyncio
 import logging
 from typing import Iterable, List, Optional
 
-from app.core.config import settings
 from app.services.embeddings import batcher
-from app.services.ml import analyze_text, generate_embeddings
+from app.services.ml import analyze_text_async, generate_embeddings_async
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ async def process_reviews(texts: Iterable[str]) -> List[dict]:
 
     loop = asyncio.get_running_loop()
     if batcher.loop and batcher.loop is not loop:
-        embeddings = generate_embeddings(texts)
+        embeddings = await generate_embeddings_async(texts)
     else:
         await ensure_batcher_started()
         embeddings = []
@@ -31,6 +30,6 @@ async def process_reviews(texts: Iterable[str]) -> List[dict]:
 
     analyses: List[dict] = []
     for text, embedding in zip(texts, embeddings):
-        result = analyze_text(text, embedding=embedding)
+        result = await analyze_text_async(text, embedding=embedding)
         analyses.append(result)
     return analyses

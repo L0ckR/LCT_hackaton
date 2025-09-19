@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     FOUNDATION_EMBEDDING_BATCH_SIZE: int = 16
     FOUNDATION_CHAT_RETRIES: int = 3
     FOUNDATION_CHAT_BACKOFF_SECONDS: float = 0.75
+    FOUNDATION_CHAT_CONCURRENCY: int = 3
+    FOUNDATION_EMBEDDING_CONCURRENCY: int = 5
 
     model_config = SettingsConfigDict(env_file=".env")
 
