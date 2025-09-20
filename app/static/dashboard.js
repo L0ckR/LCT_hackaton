@@ -3,6 +3,52 @@ const pendingJobs = new Map();
 const jobIndicator = document.getElementById('job-status');
 const jobIndicatorMessage = document.getElementById('job-status-message');
 
+let recentReviewsData = [];
+let recentReviewsGrid = null;
+const recentReviewsDom = {};
+const RECENT_REVIEWS_LIMIT = 100;
+
+let recentReviewsTotalCount = null;
+let dashboardRefreshChain = Promise.resolve();
+
+let resolveGridReady;
+const gridReadyPromise = new Promise((resolve) => {
+  resolveGridReady = resolve;
+});
+
+if (typeof window.gridjs !== 'undefined') {
+  resolveGridReady();
+} else {
+  const gridScriptElement = document.getElementById('gridjs-script');
+  if (gridScriptElement) {
+    gridScriptElement.addEventListener('load', () => resolveGridReady(), { once: true });
+    gridScriptElement.addEventListener(
+      'error',
+      () => {
+        console.error('Failed to load Grid.js script');
+        resolveGridReady();
+      },
+      { once: true },
+    );
+  } else {
+    resolveGridReady();
+  }
+}
+
+function whenGridReady(callback) {
+  gridReadyPromise.then(() => {
+    if (typeof window.gridjs === 'undefined') {
+      console.error('Grid.js is not available');
+      return;
+    }
+    try {
+      callback();
+    } catch (error) {
+      console.error('Failed to render reviews table', error);
+    }
+  });
+}
+
 function showToast(message, variant = 'success') {
   if (!message) return;
   const toast = document.getElementById('toast');
@@ -74,6 +120,25 @@ function attachJobStatusToForms(selector, message) {
   });
 }
 
+function buildHeaders(authToken) {
+  if (!authToken) {
+    return {};
+  }
+  return {
+    Authorization: `Bearer ${authToken}`,
+  };
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    const error = new Error(`Request failed: ${response.status}`);
+    error.response = response;
+    throw error;
+  }
+  return response.json();
+}
+
 function renderChart(card, labels, values, visualization, metric) {
   const widgetId = card.dataset.widgetId;
   const canvas = card.querySelector('.widget-chart');
@@ -126,7 +191,7 @@ function renderChart(card, labels, values, visualization, metric) {
   chartRegistry[widgetId] = chart;
 }
 
-function loadWidgetChart(card, authToken) {
+async function loadWidgetChart(card, authToken) {
   const visualization = card.dataset.visualization;
   if (!visualization || visualization === 'metric') {
     return;
@@ -138,134 +203,313 @@ function loadWidgetChart(card, authToken) {
     return;
   }
 
-  const headers = authToken
-    ? {
-        Authorization: `Bearer ${authToken}`,
-      }
-    : {};
-
-  fetch(`/dashboard/widgets/${widgetId}/timeseries`, {
-    credentials: 'include',
-    headers,
-  })
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error('Failed to load widget data');
-      }
-      return response.json();
-    })
-    .then((payload) => {
-      const data = payload.data || [];
-      const labels = data.map((item) => item.date);
-      const values = data.map((item) => item.value);
-      renderChart(card, labels, values, visualization, metric);
-    })
-    .catch((error) => {
-      console.error(error);
-      canvas.replaceWith('Unable to load chart');
+  try {
+    const payload = await fetchJson(`/dashboard/widgets/${widgetId}/timeseries`, {
+      credentials: 'include',
+      headers: buildHeaders(authToken),
+      cache: 'no-store',
     });
+    const data = Array.isArray(payload?.data) ? payload.data : [];
+    const labels = data.map((item) => item.date);
+    const values = data.map((item) => item.value);
+    renderChart(card, labels, values, visualization, metric);
+  } catch (error) {
+    console.error('Failed to load widget chart', error);
+    canvas.replaceWith('Unable to load chart');
+  }
 }
 
-function refreshAllCharts(authToken) {
-  document.querySelectorAll('.widget-card').forEach((card) => {
-    const visualization = card.dataset.visualization;
-    if (!visualization || visualization === 'metric') return;
-    loadWidgetChart(card, authToken);
+async function refreshAllCharts(authToken) {
+  const cards = Array.from(document.querySelectorAll('.widget-card'));
+  await Promise.all(cards.map((card) => loadWidgetChart(card, authToken)));
+}
+
+function formatMetricValue(value) {
+  if (value === null || value === undefined) {
+    return '—';
+  }
+  if (typeof value === 'number') {
+    if (Number.isInteger(value)) {
+      return value.toLocaleString('ru-RU');
+    }
+    return value.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+  }
+  return String(value);
+}
+
+async function refreshWidgetCards(authToken) {
+  try {
+    const widgets = await fetchJson('/dashboard/widgets/', {
+      credentials: 'include',
+      headers: buildHeaders(authToken),
+      cache: 'no-store',
+    });
+    if (!Array.isArray(widgets)) {
+      return;
+    }
+    widgets.forEach((widget) => {
+      const card = document.querySelector(
+        `.widget-card[data-widget-id="${widget.id}"]`,
+      );
+      if (!card) return;
+
+      if (widget.visualization === 'metric') {
+        const valueNode = card.querySelector('.widget-value');
+        if (valueNode) {
+          valueNode.textContent = formatMetricValue(widget.value);
+        }
+      }
+
+      if (widget.metric) {
+        card.dataset.metric = widget.metric;
+      }
+      if (widget.visualization) {
+        card.dataset.visualization = widget.visualization;
+      }
+    });
+  } catch (error) {
+    console.error('Failed to refresh widgets', error);
+  }
+}
+
+async function refreshOverview(authToken) {
+  try {
+    const data = await fetchJson(`/analytics/overview?ts=${Date.now()}`, {
+      credentials: 'include',
+      headers: buildHeaders(authToken),
+      cache: 'no-store',
+    });
+
+    const totalNode = document.getElementById('overview-total');
+    const avgNode = document.getElementById('overview-average');
+    if (totalNode) {
+      totalNode.textContent = data.total_reviews ?? 0;
+    }
+    if (avgNode) {
+      avgNode.textContent = (data.average_sentiment ?? 0).toFixed(2);
+    }
+    const list = document.getElementById('overview-highlights-list');
+    const empty = document.getElementById('overview-highlights-empty');
+    if (list) {
+      list.innerHTML = '';
+      const highlights = Array.isArray(data.highlights) ? data.highlights : [];
+      if (highlights.length) {
+        highlights.slice(0, 5).forEach((highlight) => {
+          const li = document.createElement('li');
+          li.textContent = highlight;
+          list.appendChild(li);
+        });
+        list.classList.remove('hidden');
+        if (empty) empty.classList.add('hidden');
+      } else {
+        list.classList.add('hidden');
+        if (empty) empty.classList.remove('hidden');
+      }
+    }
+
+    if (typeof data.total_reviews === 'number') {
+      recentReviewsTotalCount = data.total_reviews;
+      updateRecentReviewsMeta();
+    }
+  } catch (error) {
+    console.error('Failed to refresh overview', error);
+  }
+}
+
+function captureRecentReviewsDom() {
+  recentReviewsDom.container = document.getElementById('recent-reviews-table');
+  recentReviewsDom.empty = document.getElementById('recent-reviews-empty');
+  recentReviewsDom.total = document.getElementById('recent-reviews-total');
+}
+
+function normalizeReview(review) {
+  if (!review || typeof review !== 'object') {
+    return null;
+  }
+  const id = Number.parseInt(review.id, 10);
+  return {
+    ...review,
+    id: Number.isNaN(id) ? review.id : id,
+    product: review.product ?? '',
+    sentiment: review.sentiment ?? '',
+    sentiment_score: review.sentiment_score,
+    sentiment_summary: review.sentiment_summary ?? '',
+    text: typeof review.text === 'string' ? review.text : review.text ?? '',
+  };
+}
+
+function truncateText(value, limit = 120) {
+  if (!value) return '—';
+  const text = String(value);
+  if (text.length <= limit) return text;
+  return `${text.slice(0, Math.max(0, limit - 1))}…`;
+}
+
+function formatReviewDate(value) {
+  if (!value) return 'n/a';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'n/a';
+  return date.toLocaleString();
+}
+
+function reviewToRow(review) {
+  const score =
+    typeof review.sentiment_score === 'number'
+      ? review.sentiment_score.toFixed(2)
+      : '—';
+
+  return [
+    review.id ?? '—',
+    review.product || '—',
+    review.sentiment || 'pending',
+    score,
+    formatReviewDate(review.date),
+    truncateText(review.sentiment_summary, 90),
+    truncateText(review.text, 160),
+  ];
+}
+
+function updateRecentReviewsMeta() {
+  if (recentReviewsDom.total) {
+    const resolvedTotal =
+      typeof recentReviewsTotalCount === 'number'
+        ? recentReviewsTotalCount
+        : recentReviewsData.length;
+    recentReviewsDom.total.textContent = resolvedTotal ?? recentReviewsData.length ?? 0;
+  }
+  if (recentReviewsDom.empty) {
+    if (recentReviewsData.length === 0) {
+      recentReviewsDom.empty.classList.remove('hidden');
+    } else {
+      recentReviewsDom.empty.classList.add('hidden');
+    }
+  }
+}
+
+function renderRecentReviewsGrid() {
+  updateRecentReviewsMeta();
+
+  if (!recentReviewsDom.container) {
+    return;
+  }
+
+  whenGridReady(() => {
+    const data = recentReviewsData.map(reviewToRow);
+    const config = {
+      columns: [
+        { id: 'id', name: 'ID' },
+        { id: 'product', name: 'Product' },
+        { id: 'sentiment', name: 'Sentiment' },
+        { id: 'sentiment_score', name: 'Score' },
+        { id: 'date', name: 'Date' },
+        { id: 'sentiment_summary', name: 'Summary' },
+        { id: 'text', name: 'Excerpt' },
+      ],
+      data,
+      sort: true,
+      search: {
+        enabled: true,
+        placeholder: 'Поиск отзывов…',
+      },
+      pagination: {
+        enabled: true,
+        limit: 10,
+        summary: true,
+      },
+      className: {
+        table: 'reviews',
+      },
+      language: {
+        search: {
+          placeholder: 'Поиск…',
+        },
+        pagination: {
+          previous: 'Назад',
+          next: 'Вперёд',
+          showing: 'Показаны',
+          results: 'записей',
+        },
+        noRecordsFound: 'Нет отзывов',
+      },
+    };
+
+    if (!recentReviewsGrid) {
+      recentReviewsDom.container.innerHTML = '';
+      recentReviewsGrid = new gridjs.Grid(config);
+      recentReviewsGrid.render(recentReviewsDom.container);
+    } else {
+      recentReviewsGrid.updateConfig({ data }).forceRender();
+    }
+
+    updateRecentReviewsMeta();
   });
 }
 
-function refreshOverview(authToken) {
-  const headers = authToken
-    ? {
-        Authorization: `Bearer ${authToken}`,
-      }
-    : {};
+function setRecentReviewsData(reviews) {
+  recentReviewsData = Array.isArray(reviews)
+    ? reviews
+        .map((item) => normalizeReview(item))
+        .filter(Boolean)
+        .sort((a, b) => {
+          const idA = typeof a.id === 'number' ? a.id : Number(a.id) || 0;
+          const idB = typeof b.id === 'number' ? b.id : Number(b.id) || 0;
+          return idB - idA;
+        })
+    : [];
 
-  fetch(`/analytics/overview?ts=${Date.now()}`, {
-    credentials: 'include',
-    headers,
-    cache: 'no-store',
-  })
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error('Failed to load overview');
-      }
-      return response.json();
-    })
-    .then((data) => {
-      const totalNode = document.getElementById('overview-total');
-      const avgNode = document.getElementById('overview-average');
-      if (totalNode) {
-        totalNode.textContent = data.total_reviews ?? 0;
-      }
-      if (avgNode) {
-        avgNode.textContent = (data.average_sentiment ?? 0).toFixed(2);
-      }
-      const list = document.getElementById('overview-highlights-list');
-      const empty = document.getElementById('overview-highlights-empty');
-      if (list) {
-        list.innerHTML = '';
-        const highlights = Array.isArray(data.highlights) ? data.highlights : [];
-        if (highlights.length) {
-          highlights.slice(0, 5).forEach((highlight) => {
-            const li = document.createElement('li');
-            li.textContent = highlight;
-            list.appendChild(li);
-          });
-          list.classList.remove('hidden');
-          if (empty) empty.classList.add('hidden');
-        } else {
-          list.classList.add('hidden');
-          if (empty) empty.classList.remove('hidden');
-        }
-      }
-    })
-    .catch((error) => {
-      console.error(error);
-    });
+  if (typeof recentReviewsTotalCount !== 'number') {
+    recentReviewsTotalCount = recentReviewsData.length;
+  }
+
+  renderRecentReviewsGrid();
 }
 
-function refreshRecentReviews(authToken) {
-  const headers = authToken
-    ? {
-        Authorization: `Bearer ${authToken}`,
-      }
-    : {};
+function hydrateRecentReviewsFromPayload() {
+  const container = document.getElementById('recent-reviews-data');
+  if (!container) return;
+  try {
+    const payload = JSON.parse(container.textContent || '[]');
+    if (Array.isArray(payload)) {
+      setRecentReviewsData(payload);
+    }
+  } catch (error) {
+    console.error('Failed to parse initial recent reviews payload', error);
+  } finally {
+    container.remove();
+  }
+  updateRecentReviewsMeta();
+}
 
-  fetch(`/reviews/recent?ts=${Date.now()}`, {
-    credentials: 'include',
-    headers,
-    cache: 'no-store',
-  })
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error('Failed to load recent reviews');
-      }
-      return response.json();
-    })
-    .then((data) => {
-      const emptyHandler = document.getElementById('recent-reviews-empty')
-      const tbody = document.getElementById('recent-reviews-body');
-      if (!tbody) return;
-      
-      emptyHandler.style.visibility = "hidden";
-      tbody.innerHTML = '';
-      data.forEach((review) => {
-        const row = document.createElement('tr');
-        const date = review.date ? new Date(review.date).toLocaleString() : 'n/a';
-        row.innerHTML = `
-          <td>${review.id}</td>
-          <td>${review.product || '—'}</td>
-          <td>${review.sentiment || 'pending'}</td>
-          <td>${date}</td>
-          <td>${(review.text || '').slice(0, 120)}${(review.text || '').length > 120 ? '…' : ''}</td>
-        `;
-        tbody.appendChild(row);
-      });
-    })
-    .catch((error) => {
-      console.error(error);
+async function refreshRecentReviews(authToken) {
+  try {
+    const data = await fetchJson(`/reviews/recent?limit=${RECENT_REVIEWS_LIMIT}&ts=${Date.now()}`, {
+      credentials: 'include',
+      headers: buildHeaders(authToken),
+      cache: 'no-store',
     });
+    setRecentReviewsData(Array.isArray(data) ? data : []);
+  } catch (error) {
+    console.error('Failed to refresh recent reviews', error);
+  }
+}
+
+async function refreshDashboardData(authToken) {
+  await refreshOverview(authToken);
+  await refreshWidgetCards(authToken);
+  await refreshRecentReviews(authToken);
+  await refreshAllCharts(authToken);
+}
+
+function scheduleDashboardRefresh(authToken) {
+  dashboardRefreshChain = dashboardRefreshChain
+    .catch(() => {})
+    .then(() => refreshDashboardData(authToken));
+
+  dashboardRefreshChain.catch((error) => {
+    console.error('Dashboard refresh failed', error);
+  });
+
+  return dashboardRefreshChain;
 }
 
 function connectDashboardSocket(authToken) {
@@ -276,10 +520,9 @@ function connectDashboardSocket(authToken) {
     try {
       const message = JSON.parse(event.data);
       if (message.type === 'reviews_updated') {
-        refreshOverview(authToken);
-        refreshAllCharts(authToken);
-        refreshRecentReviews(authToken);
-        hideJobStatus();
+        scheduleDashboardRefresh(authToken).finally(() => {
+          hideJobStatus();
+        });
       }
       if (message.type === 'import_progress') {
         const { job_id: jobId, processed = 0, total = null } = message;
@@ -320,14 +563,14 @@ function initDashboard() {
 
   attachJobStatusToForms('.upload-form', 'Загрузка отзывов…');
 
-  refreshOverview(authToken);
-  refreshAllCharts(authToken);
-  refreshRecentReviews(authToken);
+  captureRecentReviewsDom();
+  hydrateRecentReviewsFromPayload();
+
+  scheduleDashboardRefresh(authToken);
   connectDashboardSocket(authToken);
 
   setInterval(() => {
-    refreshRecentReviews(authToken);
-    refreshOverview(authToken);
+    scheduleDashboardRefresh(authToken);
   }, 5000);
 }
 

@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Dashboard · Review Analytics{% endblock %}
+{% block styles %}
+<link rel="stylesheet" href="/static/vendor/gridjs/dist/theme/mermaid.min.css" />
+{% endblock %}
 {% block content %}
 <section class="card">
   <h2>Welcome, {{ user.email }}</h2>
@@ -82,35 +85,18 @@
   {% endif %}
 </section>
 
-<section class="card">
-  <h3>Recent reviews</h3>
-  <table class="reviews">
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Product</th>
-        <th>Sentiment</th>
-        <th>Date</th>
-        <th>Excerpt</th>
-      </tr>
-    </thead>
-    <tbody id="recent-reviews-body">
-      {% for review in reviews %}
-      <tr>
-        <td>{{ review.id }}</td>
-        <td>{{ review.product or '—' }}</td>
-        <td>{{ review.sentiment or 'pending' }}</td>
-        <td>{{ review.date.strftime('%Y-%m-%d %H:%M') if review.date else 'n/a' }}</td>
-        <td>{{ review.text[:120] }}{% if review.text|length > 120 %}…{% endif %}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  
-  {% if not reviews %}
-  <p class="hint" id="recent-reviews-empty">No reviews yet. Import data above to get started.</p>
-  {% endif %}
+<section class="card recent-reviews-card">
+  <div class="card-header">
+    <h3>Recent reviews</h3>
+    <span class="recent-reviews-count">Всего: <strong id="recent-reviews-total">{{ reviews|length }}</strong></span>
+  </div>
+
+  <div id="recent-reviews-table" aria-live="polite"></div>
+
+  <p class="hint{% if reviews %} hidden{% endif %}" id="recent-reviews-empty">No reviews yet. Import data above to get started.</p>
 </section>
+
+<script id="recent-reviews-data" type="application/json">{{ reviews | tojson }}</script>
 
 <div id="flash-data" data-status="{{ status or '' }}" data-error="{{ error or '' }}" data-job="{{ request.query_params.get('job', '') }}"></div>
 <div id="auth-data" data-token="{{ auth_token or '' }}"></div>
@@ -125,5 +111,6 @@
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="/static/vendor/gridjs/dist/gridjs.umd.js" id="gridjs-script" defer></script>
 <script src="/static/dashboard.js" defer></script>
 {% endblock %}
