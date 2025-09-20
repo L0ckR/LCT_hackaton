@@ -2,10 +2,10 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Literal, Optional
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from textblob import TextBlob
 
 from app.core.config import settings
@@ -15,30 +15,35 @@ logger = logging.getLogger(__name__)
 
 
 class SentimentPayload(BaseModel):
-    sentiment: str
+    sentiment: Literal["positive", "negative", "neutral"]
     sentiment_score: Optional[float] = None
     summary: Optional[str] = None
     highlights: List[str] = Field(default_factory=list)
 
-    @staticmethod
-    def clean(data: Dict[str, Any]) -> "SentimentPayload":
-        payload = SentimentPayload.model_validate(data)
-        if payload.sentiment not in {"positive", "negative", "neutral"}:
-            raise ValidationError(
-                [
-                    {
-                        "loc": ("sentiment",),
-                        "msg": "invalid label",
-                        "type": "value_error",
-                    }
-                ],
-                SentimentPayload,
-            )
-        return payload
+    @field_validator("summary", mode="before")
+    @classmethod
+    def _stringify_summary(cls, value: Any) -> Optional[str]:
+        if value is None or isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return str(value)
 
 
 def _llm_available() -> bool:
     return bool(settings.FOUNDATION_API_KEY)
+
+
+def _make_semaphore(limit: Optional[int]) -> asyncio.Semaphore:
+    value = limit or 1
+    if value < 1:
+        value = 1
+    return asyncio.Semaphore(value)
+
+
+_embedding_semaphore = _make_semaphore(settings.FOUNDATION_EMBEDDING_CONCURRENCY)
+_chat_semaphore = _make_semaphore(settings.FOUNDATION_CHAT_CONCURRENCY)
 
 
 def _fallback_analysis(text: str) -> Dict[str, Any]:
@@ -59,7 +64,7 @@ def _fallback_analysis(text: str) -> Dict[str, Any]:
     }
 
 
-def _parse_model_response(content: str) -> Dict[str, Any]:
+def _parse_payload(content: str) -> SentimentPayload:
     if not content:
         raise ValueError("Empty response")
     stripped = content.strip()
@@ -67,54 +72,57 @@ def _parse_model_response(content: str) -> Dict[str, Any]:
         stripped = re.sub(r"^```[a-zA-Z0-9]*", "", stripped)
         stripped = re.sub(r"```$", "", stripped).strip()
 
-    candidates = [stripped]
-    match = re.search(r"\{.*\}", stripped, re.S)
-    if match:
-        candidates.append(match.group(0))
-
-    for candidate in candidates:
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-    raise ValueError("Unable to parse JSON sentiment response")
+    try:
+        return SentimentPayload.model_validate_json(stripped)
+    except (ValidationError, json.JSONDecodeError):
+        match = re.search(r"\{.*\}", stripped, re.S)
+        if not match:
+            raise
+        return SentimentPayload.model_validate_json(match.group(0))
 
 
 async def generate_embeddings_async(texts: Iterable[str]) -> List[Optional[List[float]]]:
-    texts = list(texts)
-    if not texts:
+    sequences = list(texts)
+    if not sequences:
         return []
     if not _llm_available():
-        return [None] * len(texts)
+        return [None] * len(sequences)
 
     batch_size = max(1, settings.FOUNDATION_EMBEDDING_BATCH_SIZE)
-    embeddings: List[Optional[List[float]]] = []
-    try:
-        for start in range(0, len(texts), batch_size):
-            chunk = texts[start : start + batch_size]
-            try:
+    results: List[Optional[List[float]]] = [None] * len(sequences)
+
+    async def _run_chunk(chunk: List[tuple[int, str]]) -> None:
+        try:
+            async with _embedding_semaphore:
                 response = await create_embeddings(
                     model=settings.FOUNDATION_EMBEDDING_MODEL,
-                    input=chunk,
+                    input=[text for _, text in chunk],
                 )
-            except Exception:
-                logger.exception("Embedding batch failed; continuing without vectors")
-                embeddings.extend([None] * len(chunk))
-                continue
-            ordered = sorted(response.data, key=lambda item: item.index)
-            embeddings.extend([item.embedding for item in ordered])
-    except Exception:
-        logger.exception("Embedding generation failed; continuing without embeddings")
-        missing = len(texts) - len(embeddings)
-        embeddings.extend([None] * max(0, missing))
+        except Exception:
+            logger.exception(
+                "Embedding request failed for batch of size %s", len(chunk)
+            )
+            return
 
-    if len(embeddings) < len(texts):
-        embeddings.extend([None] * (len(texts) - len(embeddings)))
-    return embeddings
+        if not response.data:
+            logger.warning("Empty embedding response for batch of size %s", len(chunk))
+            return
+
+        ordered = sorted(response.data, key=lambda item: item.index)
+        for (position, _), item in zip(chunk, ordered):
+            results[position] = item.embedding
+
+    enumerated = list(enumerate(sequences))
+    tasks = [
+        _run_chunk(enumerated[i : i + batch_size])
+        for i in range(0, len(enumerated), batch_size)
+    ]
+    await asyncio.gather(*tasks)
+    return results
 
 
 async def analyze_text_async(
-    text: str, *, embedding: Optional[List[float]] = None
+    text: str, embedding: Optional[List[float]] = None
 ) -> Dict[str, Any]:
     if not _llm_available():
         return _fallback_analysis(text)
@@ -127,54 +135,33 @@ async def analyze_text_async(
     last_error: Optional[Exception] = None
     prompt = (
         "Ты аналитик, изучающий отзывы клиентов банка. "
-        "Проанализируй текст ниже и верни строго JSON со следующими полями: "
-        "sentiment (одно из значений: positive, negative, neutral), "
-        "sentiment_score (число от -1 до 1), summary (краткое описание до 40 слов), "
-        "highlights (список из ключевых тезисов, короткие строки).\n\n"
+        "Проанализируй текст отзыва ниже и ответь строго JSON без пояснений с ключами "
+        "sentiment, sentiment_score, summary, highlights. "
+        "sentiment — одно из значений: positive, negative, neutral. "
+        "sentiment_score — число от -1 до 1. summary — краткое описание до 40 слов. "
+        "highlights — список ключевых тезисов (короткие строки).\n\n"
         f"Отзыв: "
         f"""{text}"""
     )
 
-    schema = {
-        "name": "sentiment_payload",
-        "schema": {
-            "type": "object",
-            "properties": {
-                "sentiment": {"type": "string"},
-                "sentiment_score": {"type": ["number", "null"]},
-                "summary": {"type": ["string", "null"]},
-                "highlights": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                },
-            },
-            "required": ["sentiment"],
-            "additionalProperties": False,
-        },
-    }
-
     retries = max(1, settings.FOUNDATION_CHAT_RETRIES)
     for attempt in range(retries):
         try:
-            completion = await create_chat_completion(
-                model=settings.FOUNDATION_CHAT_MODEL,
-                max_tokens=500,
-                temperature=0.3,
-                top_p=0.9,
-                presence_penalty=0,
-                response_format={"type": "json_schema", "json_schema": schema},
-                messages=[{"role": "user", "content": prompt}],
-            )
-            content = completion.choices[0].message.content
-            raw = _parse_model_response(content)
-            payload = SentimentPayload.clean(raw)
-            summary = payload.summary
-            if isinstance(summary, (list, dict)):
-                summary = json.dumps(summary)
+            async with _chat_semaphore:
+                completion = await create_chat_completion(
+                    model=settings.FOUNDATION_CHAT_MODEL,
+                    max_tokens=500,
+                    temperature=0.3,
+                    top_p=0.9,
+                    presence_penalty=0,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+            content = completion.choices[0].message.content or ""
+            payload = _parse_payload(content)
             return {
                 "sentiment": payload.sentiment,
                 "sentiment_score": payload.sentiment_score,
-                "summary": summary,
+                "summary": payload.summary,
                 "embedding": local_embedding,
                 "highlights": payload.highlights,
             }
@@ -189,7 +176,7 @@ async def analyze_text_async(
             )
             await asyncio.sleep(delay)
             continue
-        except ValidationError as exc:
+        except (ValidationError, ValueError, json.JSONDecodeError) as exc:
             logger.warning("Invalid LLM payload structure: %s", exc)
             break
         except Exception as exc:

@@ -25,6 +25,7 @@ from app.models.review import Review
 from app.models.user import User
 from app.models.widget import Widget
 from app.realtime import broadcast_refresh, dashboard_events
+from app.schemas.review import ReviewOut
 from app.schemas.widget import MetricType, VisualizationType
 from app.services.auth import authenticate_user
 from app.services.widgets import METRIC_MAP, compute_widget_value, timeseries_for_metric
@@ -65,7 +66,16 @@ def _dashboard_context(
     status: Optional[str] = None,
     error: Optional[str] = None,
 ) -> Dict:
-    recent_reviews = db.query(Review).order_by(Review.date.desc()).limit(20).all()
+    recent_reviews = (
+        db.query(Review)
+        .order_by(Review.id.desc())
+        .limit(100)
+        .all()
+    )
+    recent_reviews_payload = [
+        ReviewOut.model_validate(review).model_dump(mode="json")
+        for review in recent_reviews
+    ]
     widgets = (
         db.query(Widget)
         .filter(Widget.owner_id == user.id)
@@ -104,7 +114,7 @@ def _dashboard_context(
     return {
         "request": request,
         "user": user,
-        "reviews": recent_reviews,
+        "reviews": recent_reviews_payload,
         "widgets": widget_cards,
         "available_metrics": AVAILABLE_METRICS,
         "available_visualizations": AVAILABLE_VISUALIZATIONS,

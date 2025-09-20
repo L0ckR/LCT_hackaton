@@ -72,7 +72,7 @@ def recent_reviews(
     limit = max(1, min(limit, 100))
     return (
         db.query(Review)
-        .order_by(Review.date.desc())
+        .order_by(Review.id.desc())
         .limit(limit)
         .all()
     )
