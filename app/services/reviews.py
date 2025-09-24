@@ -25,8 +25,10 @@ def _build_review(record: dict, analysis: dict) -> Review:
         sentiment=analysis.get("sentiment"),
         sentiment_score=analysis.get("sentiment_score"),
         sentiment_summary=analysis.get("summary"),
-        embedding=analysis.get("embedding"),
     )
+    embedding = analysis.get("embedding")
+    if embedding is not None:
+        review.embedding = [float(value) for value in embedding]
     highlights = analysis.get("highlights")
     if highlights:
         review.insights = {"highlights": list(highlights)[:5]}

@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     FOUNDATION_CHAT_BACKOFF_SECONDS: float = 0.75
     FOUNDATION_CHAT_CONCURRENCY: int = 3
     FOUNDATION_EMBEDDING_CONCURRENCY: int = 5
+    FOUNDATION_EMBEDDING_DIMENSION: int = 1024
+
+    TIMESCALE_BUCKET_INTERVAL: str = "1 day"
+    DATABASE_SEARCH_PATH: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env")
 

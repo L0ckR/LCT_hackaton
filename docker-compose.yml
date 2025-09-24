@@ -20,7 +20,7 @@ services:
     networks:
       - app-network
   db:
-    image: postgres:16
+    image: timescale/timescaledb-ha:pg16
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -28,9 +28,7 @@ services:
     ports:
       - "5432:5432"
     networks:
-      app-network:
-        aliases:
-          - db
+      - app-network
     volumes:
       - db-data:/var/lib/postgresql/data
   redis:

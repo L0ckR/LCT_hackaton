@@ -9,6 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_db
+from app.db.functions import day_bucket
 from app.models.review import Review
 from app.schemas.review import ReviewOut
 from app.services.clustering import fake_cluster
@@ -105,11 +106,7 @@ def timeseries(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    if db.bind and db.bind.dialect.name == "sqlite":
-        day_expr = func.date(Review.date).label("day")
-    else:
-        day_expr = func.date_trunc('day', Review.date).label('day')
-
+    day_expr = day_bucket(db, Review.date).label("day")
     query = db.query(
         day_expr,
         Review.sentiment,

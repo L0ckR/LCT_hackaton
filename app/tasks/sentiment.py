@@ -19,7 +19,7 @@ def analyze_sentiment_task(review_id: int):
         review.sentiment_summary = result.get("summary")
         embedding = result.get("embedding")
         if embedding is not None:
-            review.embedding = embedding
+            review.embedding = [float(value) for value in embedding]
         highlights = result.get("highlights")
         if highlights:
             review.insights = {"highlights": highlights}

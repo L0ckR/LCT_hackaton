@@ -5,6 +5,7 @@ from typing import Callable, Dict, List
 from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 
+from app.db.functions import day_bucket
 from app.models.review import Review
 from app.models.widget import Widget
 from app.schemas.widget import MetricType
@@ -75,10 +76,7 @@ def compute_widget_value(widget: Widget, db: Session) -> float:
 
 
 def _day_expression(db: Session):
-    bind = db.get_bind()
-    if bind and bind.dialect.name == "sqlite":
-        return func.date(Review.date)
-    return func.date_trunc("day", Review.date)
+    return day_bucket(db, Review.date)
 
 
 def timeseries_for_metric(db: Session, metric: MetricType) -> List[Dict[str, float]]:

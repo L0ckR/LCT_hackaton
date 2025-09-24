@@ -1,7 +1,9 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, Float, JSON
 from datetime import datetime
 
+from app.core.config import settings
 from app.db.base import Base
+from app.db.types import VectorAsJSON
 
 
 class Review(Base):
@@ -14,6 +16,6 @@ class Review(Base):
     sentiment = Column(String, index=True)
     sentiment_score = Column(Float)
     sentiment_summary = Column(Text)
-    embedding = Column(JSON)
+    embedding = Column(VectorAsJSON(settings.FOUNDATION_EMBEDDING_DIMENSION))
     insights = Column(JSON)
     cluster = Column(String, index=True)
