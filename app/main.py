@@ -5,6 +5,16 @@ from contextlib import suppress
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+    ]
+)
+
+logging.getLogger('app.services.review_parser').setLevel(logging.DEBUG)
+
 from app.api.routes import analytics, auth, parser, reviews, widgets
 from app.db.base import Base
 from app.db.session import engine, ensure_extensions, wait_for_db
