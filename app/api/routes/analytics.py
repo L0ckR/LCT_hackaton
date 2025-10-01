@@ -5,6 +5,7 @@ from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_db
+from app.db.functions import day_bucket
 from app.models.review import Review
 from app.services.widgets import METRIC_MAP, timeseries_for_metric
 
@@ -12,10 +13,7 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
 def _day_expression(db: Session):
-    bind = db.get_bind()
-    if bind and bind.dialect.name == "sqlite":
-        return func.date(Review.date)
-    return func.date_trunc("day", Review.date)
+    return day_bucket(db, Review.date)
 
 
 @router.get("/sentiment-trend")
