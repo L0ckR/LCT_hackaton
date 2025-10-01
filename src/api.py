@@ -1,38 +1,35 @@
+# main.py
+
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-from typing import List, Union, Dict, Any
+from pydantic import BaseModel
+from typing import Any
 import json
-from .report_agent import generate_pdf_report  
+from .dashboard_builder import generate_chart
 
-app = FastAPI()
+app = FastAPI(
+    title="Chart Report Generator",
+    description="API для генерации графиков на основе входных данных",
+    version="1.0.0"
+)
 
-class ChartItem(BaseModel):
-    chart_name: str
-    chart_data: Union[Dict[str, Union[int, float]], List[Dict[str, Any]]]
+class ChartRequest(BaseModel):
+    data: str  
+
+class ChartResponse(BaseModel):
     chart_type: str
+    columns: list[str]
+    metric_name: str
+    aggregate_by: str
 
-    model_config = {"populate_by_name": True}  
+@app.post("/generate-chart", response_model=ChartResponse)
+async def generate_report(request: ChartRequest):
 
-@app.post("/generate_report")
-async def generate_report(charts: List[ChartItem]):
     try:
-        charts_data = [
-            {
-                "chart_name": chart.chart_name,
-                "chart_data": chart.chart_data,
-                "chart_type": chart.chart_type
-            }
-            for chart in charts
-        ]
-
-        charts_json_str = json.dumps(charts_data, ensure_ascii=False)
-
-        report = await generate_pdf_report(charts_json_str)
-
-        return report
-
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"Ошибка парсинга JSON: {str(e)}")
+        result = await generate_chart(request.data)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка генерации отчёта: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

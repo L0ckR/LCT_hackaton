@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  report-api:
+  dashboard-api:
     build: .
     ports:
-      - "8000:8000"
+      - "8003:8003"
