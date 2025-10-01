@@ -5,7 +5,7 @@ from contextlib import suppress
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import auth, reviews, widgets, analytics
+from app.api.routes import analytics, auth, parser, reviews, widgets
 from app.db.base import Base
 from app.db.session import engine, ensure_extensions, wait_for_db
 from app.web import router as web_router, ws_router as web_ws_router
@@ -25,6 +25,7 @@ app.include_router(auth.router)
 app.include_router(reviews.router)
 app.include_router(widgets.router)
 app.include_router(analytics.router)
+app.include_router(parser.router)
 app.include_router(web_router)
 app.include_router(web_ws_router)
 

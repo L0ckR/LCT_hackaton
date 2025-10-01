@@ -1,3 +1,3 @@
-from . import auth, reviews, widgets, analytics
+from . import analytics, auth, parser, reviews, widgets
 
-__all__ = ["auth", "reviews", "widgets", "analytics"]
+__all__ = ["auth", "reviews", "widgets", "analytics", "parser"]
