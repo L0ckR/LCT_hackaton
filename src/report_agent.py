@@ -12,7 +12,7 @@ load_dotenv()
 
 LLM_API_KEY = os.getenv('LLM_API_KEY')
 BASE_URL = os.getenv('LLM_BASE_URL')
-
+MODEL_NAME = os.getenv('MODEL_NAME')
 class ReportJsonSchema(BaseModel):
     executive_summary: dict = Field(
         description="Сводка с ключевыми выводами и рекомендациями"
@@ -22,7 +22,7 @@ class ReportJsonSchema(BaseModel):
     )
 
 LLM = ChatOpenAI(
-    model="Qwen/Qwen3-Next-80B-A3B-Instruct",
+    model=MODEL_NAME,
     temperature=0,
     api_key=LLM_API_KEY,
     base_url=BASE_URL,
