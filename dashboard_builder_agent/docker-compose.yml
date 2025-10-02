@@ -1,0 +1,7 @@
+version: '3.8'
+
+services:
+  dashboard-api:
+    build: .
+    ports:
+      - "8003:8003"
