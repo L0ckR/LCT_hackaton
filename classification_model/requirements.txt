@@ -1,0 +1,4 @@
+ray[serve]
+requests
+torch
+transformers

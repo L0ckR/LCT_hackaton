@@ -1,0 +1,236 @@
+{
+  "dashboard": "feedback_business_impact",
+  "title": "Влияние отзывов на бизнес-метрики",
+  "description": "Связь релизов продукта и динамики клиентской тональности (мобильное приложение).",
+  "timeframe": {
+    "start": "2024-01-01",
+    "end": "2025-05-31",
+    "step": "month"
+  },
+  "filters": {
+    "dateRange": {
+      "start": "2024-01-01",
+      "end": "2025-05-31"
+    },
+    "products": [
+      "Все",
+      "Мобильное приложение",
+      "Ипотека",
+      "Кредитные карты",
+      "Инвестиции"
+    ],
+    "topics": ["Все", "Мобильное приложение"],
+    "releases": [
+      "2024-02-15_onboarding",
+      "2024-04-10_biometric_pay",
+      "2024-07-05_perf_opt",
+      "2024-10-20_ui_redesign_p1",
+      "2024-12-12_ios_crash_fix",
+      "2025-02-18_loyalty_revamp",
+      "2025-04-08_ai_assistant"
+    ]
+  },
+  "metrics": {
+    "current_mobile_app_nps": 41.2,
+    "baseline_mobile_app_nps_jan2024": 34.0,
+    "delta_nps_absolute": 7.2,
+    "cumulative_negative_share_reduction_pct": 11.5,
+    "latest_3m_positive_growth_pct": 9.3,
+    "avg_post_release_positive_uplift_pct": 4.8
+  },
+  "charts": [
+    {
+      "id": "product_release_timeline",
+      "type": "event_timeline",
+      "title": "Релизы и изменения продукта (мобильное приложение)",
+      "xAxisLabel": "Дата",
+      "xAxis": [
+        "2024-01",
+        "2024-02",
+        "2024-03",
+        "2024-04",
+        "2024-05",
+        "2024-06",
+        "2024-07",
+        "2024-08",
+        "2024-09",
+        "2024-10",
+        "2024-11",
+        "2024-12",
+        "2025-01",
+        "2025-02",
+        "2025-03",
+        "2025-04",
+        "2025-05"
+      ],
+      "events": [
+        {
+          "date": "2024-02-15",
+          "code": "2024-02-15_onboarding",
+          "name": "Упрощённый онбординг",
+          "category": "feature",
+          "hypothesis": "Снижение раннего оттока и негативных отзывов про авторизацию",
+          "observed": {
+            "positive_uplift_pct": 3.2,
+            "negative_share_delta_pct": -1.1,
+            "nps_delta": 0.9
+          }
+        },
+        {
+          "date": "2024-04-10",
+          "code": "2024-04-10_biometric_pay",
+          "name": "Биометрическая оплата",
+          "category": "feature",
+          "hypothesis": "Рост удовлетворенности частыми платежами",
+          "observed": {
+            "positive_uplift_pct": 4.1,
+            "negative_share_delta_pct": -0.8,
+            "nps_delta": 1.2
+          }
+        },
+        {
+          "date": "2024-07-05",
+          "code": "2024-07-05_perf_opt",
+          "name": "Оптимизация производительности",
+          "category": "performance",
+          "hypothesis": "Снижение жалоб на скорость и фризы",
+          "observed": {
+            "positive_uplift_pct": 5.0,
+            "negative_share_delta_pct": -1.6,
+            "nps_delta": 1.4
+          }
+        },
+        {
+          "date": "2024-10-20",
+          "code": "2024-10-20_ui_redesign_p1",
+          "name": "Редизайн интерфейса (этап 1)",
+          "category": "ux",
+          "hypothesis": "Рост вовлеченности и понимания потоков",
+          "observed": {
+            "positive_uplift_pct": 2.6,
+            "negative_share_delta_pct": -0.4,
+            "nps_delta": 0.7
+          }
+        },
+        {
+          "date": "2024-12-12",
+          "code": "2024-12-12_ios_crash_fix",
+          "name": "Фикс крашей iOS 18",
+          "category": "stability",
+          "hypothesis": "Снижение негативных отзывов об ошибках",
+          "observed": {
+            "positive_uplift_pct": 3.9,
+            "negative_share_delta_pct": -2.1,
+            "nps_delta": 1.9
+          }
+        },
+        {
+          "date": "2025-02-18",
+          "code": "2025-02-18_loyalty_revamp",
+          "name": "Перезапуск программы лояльности",
+          "category": "feature",
+          "hypothesis": "Увеличение позитивных отзывов о ценности",
+          "observed": {
+            "positive_uplift_pct": 4.4,
+            "negative_share_delta_pct": -0.9,
+            "nps_delta": 1.0
+          }
+        },
+        {
+          "date": "2025-04-08",
+          "code": "2025-04-08_ai_assistant",
+          "name": "AI-ассистент поддержки",
+          "category": "support",
+          "hypothesis": "Снижение жалоб на медленные ответы",
+          "observed": {
+            "positive_uplift_pct": 5.3,
+            "negative_share_delta_pct": -1.3,
+            "nps_delta": 1.5
+          }
+        }
+      ]
+    },
+    {
+      "id": "mobile_app_sentiment_trend",
+      "type": "stacked_area",
+      "title": "Динамика тональности отзывов — Мобильное приложение",
+      "topic": "Мобильное приложение",
+      "xAxisLabel": "Месяц",
+      "yAxisLabel": "Количество отзывов",
+      "xAxis": [
+        "2024-01",
+        "2024-02",
+        "2024-03",
+        "2024-04",
+        "2024-05",
+        "2024-06",
+        "2024-07",
+        "2024-08",
+        "2024-09",
+        "2024-10",
+        "2024-11",
+        "2024-12",
+        "2025-01",
+        "2025-02",
+        "2025-03",
+        "2025-04",
+        "2025-05"
+      ],
+      "series": [
+        {
+          "name": "Позитивные",
+          "type": "area",
+          "stack": "sentiment",
+          "data": [
+            6450, 6655, 6810, 7065, 7020, 7190, 7550, 7480, 7610, 7805, 7690,
+            7920, 8010, 8255, 8310, 8565, 8730
+          ]
+        },
+        {
+          "name": "Нейтральные",
+          "type": "area",
+          "stack": "sentiment",
+          "data": [
+            2920, 3010, 2955, 3080, 3005, 2975, 3050, 2995, 2930, 2875, 2810,
+            2790, 2860, 2945, 2925, 2890, 2840
+          ]
+        },
+        {
+          "name": "Негативные",
+          "type": "area",
+          "stack": "sentiment",
+          "data": [
+            2780, 2715, 2660, 2545, 2480, 2435, 2310, 2405, 2360, 2285, 2210,
+            2050, 2140, 2065, 1990, 1875, 1825
+          ]
+        }
+      ],
+      "annotations": {
+        "releases": [
+          { "date": "2024-02-15", "label": "Онбординг", "impact": "minor" },
+          { "date": "2024-04-10", "label": "BioPay", "impact": "moderate" },
+          { "date": "2024-07-05", "label": "Perf Opt", "impact": "high" },
+          { "date": "2024-10-20", "label": "UI v1", "impact": "minor" },
+          { "date": "2024-12-12", "label": "CrashFix", "impact": "high" },
+          { "date": "2025-02-18", "label": "Loyalty", "impact": "moderate" },
+          { "date": "2025-04-08", "label": "AI Assist", "impact": "high" }
+        ]
+      },
+      "derived": {
+        "negative_share_start_pct": 18.3,
+        "negative_share_end_pct": 13.0,
+        "positive_share_start_pct": 57.7,
+        "positive_share_end_pct": 64.3
+      }
+    }
+  ],
+  "exportOptions": {
+    "formats": ["PDF", "PNG", "CSV", "JSON"],
+    "defaultFilename": "business_impact_202401_202505"
+  },
+  "meta": {
+    "version": 1,
+    "generatedAt": "2025-10-02T12:00:00.000Z",
+    "locale": "ru-RU"
+  }
+}

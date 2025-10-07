@@ -1,0 +1,370 @@
+{
+  "dashboard": "incident_operational_analysis",
+  "title": "Детальный анализ инцидентов и оперативное реагирование",
+  "timeframe": {
+    "start": "2025-01-01",
+    "end": "2025-05-31",
+    "step": "week"
+  },
+  "filters": {
+    "dateRange": {
+      "start": "2025-01-01",
+      "end": "2025-05-31"
+    },
+    "products": [
+      "Все",
+      "Кредитные карты",
+      "Ипотека",
+      "Дебетовые карты",
+      "Мобильное приложение",
+      "Инвестиции"
+    ],
+    "channels": [
+      "Все",
+      "App Store",
+      "Google Play",
+      "VK",
+      "Форумы",
+      "Чат поддержка",
+      "Соцсети"
+    ],
+    "slaStages": [
+      "Получено",
+      "Классифицировано",
+      "Назначено",
+      "Решено",
+      "Закрыто (позитив)"
+    ]
+  },
+  "metrics": {
+    "total_negative_reviews": 18432,
+    "avg_resolution_time_hours": 37.6,
+    "median_resolution_time_hours": 18,
+    "sla_met_pct": 82.4,
+    "reopened_pct": 6.3
+  },
+  "charts": [
+    {
+      "id": "problems_treemap",
+      "type": "treemap",
+      "title": "Актуальные проблемные области (объем и динамика)",
+      "legendNote": "Размер = объем негативных упоминаний, цвет = динамика (красный - рост, зеленый - снижение)",
+      "colorEncoding": {
+        "meaning": "delta_pct (процент изменения за последние 4 недели vs предыдущие 4)",
+        "scale": {
+          "min": -40,
+          "max": 60,
+          "badColor": "#d32f2f",
+          "goodColor": "#2e7d32",
+          "neutralColor": "#9e9e9e"
+        }
+      },
+      "data": [
+        {
+          "name": "Мобильное приложение",
+          "value": 5420,
+          "delta_pct": 28,
+          "direction": "up",
+          "children": [
+            {
+              "name": "Краш на iOS",
+              "value": 1730,
+              "delta_pct": 41,
+              "direction": "up"
+            },
+            {
+              "name": "Зависание авторизации",
+              "value": 1220,
+              "delta_pct": 15,
+              "direction": "up"
+            },
+            {
+              "name": "Push не приходят",
+              "value": 960,
+              "delta_pct": -12,
+              "direction": "down"
+            },
+            {
+              "name": "Медленная загрузка",
+              "value": 780,
+              "delta_pct": 6,
+              "direction": "up"
+            },
+            {
+              "name": "Актуализация баланса",
+              "value": 730,
+              "delta_pct": -18,
+              "direction": "down"
+            }
+          ]
+        },
+        {
+          "name": "Кредитные карты",
+          "value": 3810,
+          "delta_pct": 9,
+          "direction": "up",
+          "children": [
+            {
+              "name": "Овердрафт списания",
+              "value": 1440,
+              "delta_pct": 22,
+              "direction": "up"
+            },
+            {
+              "name": "Доставка карты",
+              "value": 920,
+              "delta_pct": -7,
+              "direction": "down"
+            },
+            {
+              "name": "Комиссии неочевидные",
+              "value": 780,
+              "delta_pct": 5,
+              "direction": "up"
+            },
+            {
+              "name": "Лимиты оплаты",
+              "value": 670,
+              "delta_pct": -11,
+              "direction": "down"
+            }
+          ]
+        },
+        {
+          "name": "Ипотека",
+          "value": 2980,
+          "delta_pct": 34,
+          "direction": "up",
+          "children": [
+            {
+              "name": "Расчет досрочного погашения",
+              "value": 1310,
+              "delta_pct": 52,
+              "direction": "up"
+            },
+            {
+              "name": "Скорость рассмотрения",
+              "value": 890,
+              "delta_pct": 19,
+              "direction": "up"
+            },
+            {
+              "name": "Документы не загружаются",
+              "value": 430,
+              "delta_pct": -9,
+              "direction": "down"
+            },
+            {
+              "name": "Обновление статуса заявки",
+              "value": 350,
+              "delta_pct": 8,
+              "direction": "up"
+            }
+          ]
+        },
+        {
+          "name": "Инвестиции",
+          "value": 2210,
+          "delta_pct": -6,
+          "direction": "down",
+          "children": [
+            {
+              "name": "Запоздалые котировки",
+              "value": 720,
+              "delta_pct": -14,
+              "direction": "down"
+            },
+            {
+              "name": "Исполнение ордеров",
+              "value": 610,
+              "delta_pct": 3,
+              "direction": "up"
+            },
+            {
+              "name": "График не грузится",
+              "value": 480,
+              "delta_pct": -21,
+              "direction": "down"
+            },
+            {
+              "name": "Ошибки маржинальности",
+              "value": 400,
+              "delta_pct": 5,
+              "direction": "up"
+            }
+          ]
+        },
+        {
+          "name": "Поддержка / сервис",
+          "value": 2012,
+          "delta_pct": 17,
+          "direction": "up",
+          "children": [
+            {
+              "name": "Долгое ожидание оператора",
+              "value": 880,
+              "delta_pct": 27,
+              "direction": "up"
+            },
+            {
+              "name": "Нет ответа в чате",
+              "value": 640,
+              "delta_pct": 12,
+              "direction": "up"
+            },
+            {
+              "name": "Шаблонные ответы",
+              "value": 492,
+              "delta_pct": -4,
+              "direction": "down"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sla_funnel",
+      "type": "funnel",
+      "title": "Проход негативных отзывов через процесс SLA",
+      "stagesOrder": [
+        "Получено",
+        "Классифицировано",
+        "Назначено",
+        "Решено",
+        "Закрыто (позитив)"
+      ],
+      "data": [
+        { "stage": "Получено", "value": 18432 },
+        {
+          "stage": "Классифицировано",
+          "value": 17110,
+          "conversion_pct_from_prev": 92.9
+        },
+        {
+          "stage": "Назначено",
+          "value": 15240,
+          "conversion_pct_from_prev": 89.1
+        },
+        { "stage": "Решено", "value": 11180, "conversion_pct_from_prev": 73.4 },
+        {
+          "stage": "Закрыто (позитив)",
+          "value": 9235,
+          "conversion_pct_from_prev": 82.6
+        }
+      ],
+      "bottlenecks": [
+        {
+          "between": "Назначено -> Решено",
+          "loss_pct": 26.6,
+          "comment": "Основная потеря — длительное решение сложных технических проблем"
+        }
+      ]
+    },
+    {
+      "id": "top5_negative_topics",
+      "type": "sparklines_group",
+      "title": "TOP-5 негативных тем (динамика по неделям)",
+      "xAxis": [
+        "2025-01-06",
+        "2025-01-13",
+        "2025-01-20",
+        "2025-01-27",
+        "2025-02-03",
+        "2025-02-10",
+        "2025-02-17",
+        "2025-02-24",
+        "2025-03-03",
+        "2025-03-10",
+        "2025-03-17",
+        "2025-03-24",
+        "2025-03-31",
+        "2025-04-07",
+        "2025-04-14",
+        "2025-04-21",
+        "2025-04-28",
+        "2025-05-05",
+        "2025-05-12",
+        "2025-05-19",
+        "2025-05-26"
+      ],
+      "items": [
+        {
+          "id": "mortgage_prepayment_calc",
+          "product": "Ипотека",
+          "topic": "Расчет досрочного погашения",
+          "series": [
+            32, 34, 37, 41, 44, 46, 49, 55, 60, 63, 69, 72, 78, 83, 85, 90, 96,
+            101, 108, 112, 118
+          ],
+          "change_abs": 40,
+          "change_pct": 51.3,
+          "direction": "up",
+          "last_value": 118
+        },
+        {
+          "id": "app_ios_crash",
+          "product": "Мобильное приложение",
+          "topic": "Краш на iOS",
+          "series": [
+            54, 57, 60, 63, 61, 66, 70, 73, 75, 81, 86, 84, 92, 95, 101, 104,
+            108, 115, 119, 122, 129
+          ],
+          "change_abs": 48,
+          "change_pct": 59.2,
+          "direction": "up",
+          "last_value": 129
+        },
+        {
+          "id": "credit_overdraft",
+          "product": "Кредитные карты",
+          "topic": "Овердрафт списания",
+          "series": [
+            40, 42, 44, 43, 45, 47, 49, 50, 52, 55, 56, 58, 59, 61, 63, 65, 67,
+            66, 68, 69, 72
+          ],
+          "change_abs": 22,
+          "change_pct": 44.0,
+          "direction": "up",
+          "last_value": 72
+        },
+        {
+          "id": "support_wait_time",
+          "product": "Поддержка / сервис",
+          "topic": "Долгое ожидание оператора",
+          "series": [
+            28, 30, 31, 29, 35, 37, 39, 38, 42, 44, 45, 47, 49, 51, 52, 50, 53,
+            55, 56, 54, 57
+          ],
+          "change_abs": 18,
+          "change_pct": 46.2,
+          "direction": "up",
+          "last_value": 57
+        },
+        {
+          "id": "auth_freeze",
+          "product": "Мобильное приложение",
+          "topic": "Зависание авторизации",
+          "series": [
+            22, 23, 24, 26, 27, 28, 30, 32, 33, 35, 36, 38, 39, 41, 42, 44, 45,
+            47, 48, 49, 51
+          ],
+          "change_abs": 25,
+          "change_pct": 96.2,
+          "direction": "up",
+          "last_value": 51
+        }
+      ],
+      "notes": "change рассчитывается: последние 4 недели vs предыдущие 4"
+    }
+  ],
+  "exportOptions": {
+    "formats": ["CSV", "XLSX", "PNG", "JSON"],
+    "defaultFilename": "incident_dashboard_202501_202505"
+  },
+  "meta": {
+    "version": 1,
+    "generatedAt": "2025-10-02T10:00:00.000Z",
+    "currency": "RUB",
+    "locale": "ru-RU"
+  }
+}
