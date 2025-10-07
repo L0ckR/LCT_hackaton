@@ -6,11 +6,11 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class ParserSource(str, Enum):
-    GAZPROMBANK_REVIEWS = "gazprombank_reviews"
+    GAZPROMBANK_SRAVNI = "gazprombank_reviews"
+    BANKI_RU = "banki_ru"
 
 
-class GazprombankReviewsJob(BaseModel):
-    source: Literal[ParserSource.GAZPROMBANK_REVIEWS] = ParserSource.GAZPROMBANK_REVIEWS
+class _BaseParserJob(BaseModel):
     start_date: Optional[datetime] = Field(
         default=None,
         description="Stop parsing when reviews older than this ISO timestamp are reached",
@@ -49,16 +49,27 @@ class GazprombankReviewsJob(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_delays(self) -> "GazprombankReviewsJob":
+    def validate_delays(self) -> "_BaseParserJob":
         if self.max_delay < self.min_delay:
             raise ValueError("max_delay must be greater than or equal to min_delay")
         return self
 
 
-ParseJobRequest = Annotated[GazprombankReviewsJob, Field(discriminator="source")]
+class GazprombankReviewsJob(_BaseParserJob):
+    source: Literal[ParserSource.GAZPROMBANK_SRAVNI] = ParserSource.GAZPROMBANK_SRAVNI
 
 
-class GazprombankReview(BaseModel):
+class BankiRuReviewsJob(_BaseParserJob):
+    source: Literal[ParserSource.BANKI_RU] = ParserSource.BANKI_RU
+
+
+ParseJobRequest = Annotated[
+    Union[GazprombankReviewsJob, BankiRuReviewsJob],
+    Field(discriminator="source"),
+]
+
+
+class ReviewRow(BaseModel):
     url: str
     review_date: str
     user_name: str
@@ -82,7 +93,7 @@ class ParseJobResult(BaseModel):
     download_url: str
     rows_written: int
     metadata: Dict[str, Any] = Field(default_factory=dict)
-    rows: list[GazprombankReview] = Field(
+    rows: list[ReviewRow] = Field(
         default_factory=list,
-        description="Сырые строки с отзывами Газпромбанка в том виде, как они сохранены в CSV.",
+        description="Сырые строки с отзывами в том виде, как они сохранены в CSV.",
     )

@@ -16,14 +16,26 @@ parser_service = ParserService()
 @router.post("/run", response_model=ParseJobResult)
 async def run_parser_job(job: ParseJobRequest, user=Depends(get_current_user)):
     try:
-        result = await parser_service.parse_gazprombank_reviews(
-            page_size=job.page_size,
-            max_pages=job.max_pages,
-            start_date=job.start_date,
-            output_filename=job.output_filename,
-            finger_print=job.finger_print,
-            delay_range=(job.min_delay, job.max_delay),
-        )
+        if job.source is ParserSource.GAZPROMBANK_SRAVNI:
+            result = await parser_service.parse_gazprombank_reviews(
+                page_size=job.page_size,
+                max_pages=job.max_pages,
+                start_date=job.start_date,
+                output_filename=job.output_filename,
+                finger_print=job.finger_print,
+                delay_range=(job.min_delay, job.max_delay),
+            )
+        elif job.source is ParserSource.BANKI_RU:
+            result = await parser_service.parse_banki_ru_reviews(
+                page_size=job.page_size,
+                max_pages=job.max_pages,
+                start_date=job.start_date,
+                output_filename=job.output_filename,
+                finger_print=job.finger_print,
+                delay_range=(job.min_delay, job.max_delay),
+            )
+        else:
+            raise ParserServiceError(f"Unsupported parser source: {job.source}")
     except ParserServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc: 

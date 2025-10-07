@@ -1,11 +1,14 @@
 import asyncio
 import csv
+import json
 import logging
 import random
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from html import unescape
 from typing import Any, Dict, Iterable, List, Optional
 
 import requests
@@ -20,6 +23,8 @@ logger = logging.getLogger(__name__)
 GAZPROMBANK_ID = "5bb4f768245bc22a520a6115"
 GAZPROMBANK_SLUG = "gazprombank"
 GAZPROMBANK_NAME = "Газпромбанк"
+BANKI_RU_SLUG = "gazprombank"
+BANKI_RU_NAME = "Газпромбанк"
 
 
 class ParserServiceError(RuntimeError):
@@ -183,6 +188,14 @@ class SravniParser:
                 slug=slug,
             )
             parsed_rows.extend(page_rows)
+            if page_rows:
+                sample = page_rows[0]
+                logger.info(
+                    "sravni page %s parsed review id=%s title=%s",
+                    page,
+                    sample.get("review_id"),
+                    (sample.get("review_title") or "")[:80],
+                )
             if should_stop:
                 logger.info("Reached start date threshold, stopping at page %s", page)
                 break
@@ -316,11 +329,345 @@ class SravniParser:
         return candidate
 
 
+class BankiRuParser:
+    """Parser for banki.ru reviews."""
+
+    _BASE_URL_TEMPLATE = "https://www.banki.ru/services/responses/bank/{slug}/"
+    _REVIEW_URL_TEMPLATE = (
+        "https://www.banki.ru/services/responses/bank/{slug}/?id={review_id}"
+    )
+
+    def __init__(self, data_dir: Optional[Path] = None) -> None:
+        root_dir = Path(__file__).resolve().parents[2]
+        self.data_dir = data_dir or (root_dir / "data")
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._csv_writer = _CsvWriter(self.data_dir)
+        self._user_agent_provider = _UserAgentProvider()
+        self._session = requests.Session()
+
+    def parse_reviews(
+        self,
+        page_size: int = 20,
+        max_pages: int = 200,
+        start_date: Optional[datetime] = None,
+        bank_slug: Optional[str] = None,
+        bank_name: Optional[str] = None,
+        output_filename: Optional[str] = None,
+        finger_print: Optional[str] = None,  # noqa: ARG002 - совместимость схемы
+        delay_range: tuple[float, float] = (1.0, 2.0),
+    ) -> ParseResult:
+        if page_size <= 0:
+            raise ParserServiceError("Page size must be positive")
+        if max_pages <= 0:
+            raise ParserServiceError("Max pages must be positive")
+        if delay_range[0] > delay_range[1]:
+            raise ParserServiceError("Invalid delay range configuration")
+        if finger_print:
+            logger.debug("finger_print parameter is ignored for banki.ru parser")
+
+        slug = bank_slug or BANKI_RU_SLUG
+        bank_name = bank_name or BANKI_RU_NAME
+
+        logger.info("Starting banki.ru reviews parsing for %s", bank_name)
+        delay_min, delay_max = delay_range
+        threshold = start_date.replace(tzinfo=None) if start_date else None
+        parsed_rows: List[Dict[str, Any]] = []
+
+        for page in range(1, max_pages + 1):
+            page_url = self._build_page_url(slug, page)
+            logger.debug("Fetching banki.ru reviews page %s url=%s", page, page_url)
+            response = self._fetch_banki_page(page_url, slug, page)
+
+            items, has_more, ld_reviews = self._extract_page_payload(response.text)
+            if not items:
+                logger.info("No review items returned on banki.ru page %s, stopping", page)
+                break
+            if ld_reviews and len(ld_reviews) != len(items):
+                logger.debug(
+                    "banki.ru JSON-LD reviews count (%s) differs from item count (%s) on page %s",
+                    len(ld_reviews),
+                    len(items),
+                    page,
+                )
+
+            should_stop = False
+            page_rows: List[Dict[str, Any]] = []
+            for index, item in enumerate(items):
+                meta = ld_reviews[index] if index < len(ld_reviews) else {}
+                row, stop_row = self._build_row(
+                    item=item,
+                    meta=meta,
+                    slug=slug,
+                    bank_name=bank_name,
+                    threshold=threshold,
+                )
+                if row:
+                    page_rows.append(row)
+                if stop_row:
+                    should_stop = True
+                    break
+
+            parsed_rows.extend(page_rows)
+            if should_stop:
+                logger.info("Reached start date threshold on banki.ru page %s", page)
+                break
+            if page_rows:
+                sample = page_rows[0]
+                logger.info(
+                    "banki.ru page %s parsed review id=%s title=%s",
+                    page,
+                    sample.get("review_id"),
+                    (sample.get("review_title") or "")[:80],
+                )
+            if not has_more:
+                logger.info("Last banki.ru page reached for banki.ru parser")
+                break
+            if delay_max > 0:
+                time.sleep(random.uniform(delay_min, delay_max))
+
+        if not parsed_rows:
+            raise ParserServiceError("No reviews parsed for banki.ru")
+
+        filename = self._ensure_csv_filename(output_filename or f"banki_ru_reviews_{slug}.csv")
+        headers = (
+            "url",
+            "review_date",
+            "user_name",
+            "user_city",
+            "user_city_full",
+            "review_title",
+            "review_text",
+            "review_status",
+            "problem_status",
+            "rating",
+            "review_tag",
+            "bank_name",
+            "is_bank_ans",
+            "review_id",
+        )
+        path = self._csv_writer.write(filename, headers, parsed_rows)
+        logger.info(
+            "Finished banki.ru reviews parsing for %s. Total reviews: %s",
+            bank_name,
+            len(parsed_rows),
+        )
+        return ParseResult(
+            source="banki_ru",
+            filename=filename,
+            csv_path=path,
+            rows_written=len(parsed_rows),
+            metadata={
+                "bank_slug": slug,
+                "bank_name": bank_name,
+                "start_date": start_date.isoformat() if start_date else None,
+                "max_pages": max_pages,
+                "page_size": page_size,
+            },
+            rows=parsed_rows,
+        )
+
+    def _build_page_url(self, slug: str, page: int) -> str:
+        base = self._base_url(slug)
+        if page <= 1:
+            return base
+        return f"{base}?page={page}"
+
+    def _base_url(self, slug: str) -> str:
+        return self._BASE_URL_TEMPLATE.format(slug=slug)
+
+    def _build_headers(self, referer: Optional[str] = None) -> Dict[str, str]:
+        headers = {
+            "User-Agent": self._user_agent_provider.get(),
+            "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+        }
+        if referer:
+            headers["Referer"] = referer
+        return headers
+
+    def _fetch_banki_page(self, url: str, slug: str, page: int) -> requests.Response:
+        referer = self._base_url(slug)
+        for attempt in range(1, 4):
+            try:
+                response = self._session.get(
+                    url,
+                    headers=self._build_headers(referer=referer),
+                    timeout=30,
+                )
+            except requests.RequestException as exc:
+                logger.warning(
+                    "banki.ru request error on page %s (attempt %s/3): %s",
+                    page,
+                    attempt,
+                    exc,
+                )
+                time.sleep(5)
+                continue
+
+            if response.status_code == 429:
+                logger.warning(
+                    "Received HTTP 429 on banki.ru page %s (attempt %s/3), backing off for 60s",
+                    page,
+                    attempt,
+                )
+                time.sleep(60)
+                continue
+            if 500 <= response.status_code < 600:
+                logger.error(
+                    "Received HTTP %s on banki.ru page %s (attempt %s/3)",
+                    response.status_code,
+                    page,
+                    attempt,
+                )
+                time.sleep(5)
+                continue
+            if response.status_code != 200:
+                message = (
+                    f"Unexpected response {response.status_code} on banki.ru page {page}"
+                )
+                logger.error(message)
+                raise ParserServiceError(message)
+            return response
+
+        message = f"Failed to fetch banki.ru page {page} after multiple attempts"
+        logger.error(message)
+        raise ParserServiceError(message)
+
+    def _extract_page_payload(
+        self,
+        html_content: str,
+    ) -> tuple[List[Dict[str, Any]], bool, List[Dict[str, Any]]]:
+        options: Optional[Dict[str, Any]] = None
+        for match in re.finditer(
+            r'data-module-options=(?P<q>"|\')(?P<content>.*?)(?P=q)',
+            html_content,
+            re.DOTALL,
+        ):
+            raw_options = match.group("content")
+            try:
+                candidate = json.loads(unescape(raw_options))
+            except json.JSONDecodeError:
+                continue
+            if "responses" in candidate:
+                options = candidate
+                break
+        else:
+            raise ParserServiceError(
+                "Banki.ru markup changed: responses payload not found"
+            )
+        assert options is not None  # for type checkers
+        responses = options.get("responses") or {}
+        items = responses.get("data") or []
+        has_more = bool(responses.get("hasMorePages"))
+        ld_reviews = self._extract_jsonld_reviews(html_content)
+        return items, has_more, ld_reviews
+
+    def _extract_jsonld_reviews(self, html_content: str) -> List[Dict[str, Any]]:
+        reviews: List[Dict[str, Any]] = []
+        for match in re.finditer(
+            r'<script type="application/ld\+json">(.*?)</script>',
+            html_content,
+            re.DOTALL,
+        ):
+            try:
+                payload = json.loads(match.group(1))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and isinstance(payload.get("review"), list):
+                for entry in payload["review"]:
+                    if isinstance(entry, dict) and entry.get("@type") == "Review":
+                        reviews.append(entry)
+                break
+        return reviews
+
+    def _build_row(
+        self,
+        *,
+        item: Dict[str, Any],
+        meta: Dict[str, Any],
+        slug: str,
+        bank_name: str,
+        threshold: Optional[datetime],
+    ) -> tuple[Optional[Dict[str, Any]], bool]:
+        review_id = item.get("id")
+        date_raw = item.get("dateCreate") or ""
+        review_date_dt = self._parse_datetime(date_raw)
+        if threshold and review_date_dt and review_date_dt < threshold:
+            return None, True
+
+        review_url = (
+            self._REVIEW_URL_TEMPLATE.format(slug=slug, review_id=review_id)
+            if review_id
+            else ""
+        )
+        review_date_value = (
+            review_date_dt.isoformat() if review_date_dt else (date_raw or "")
+        )
+        description = meta.get("description") or item.get("text") or ""
+        review_text = self._normalize_text(description)
+        title = item.get("title") or meta.get("name") or ""
+        rating = item.get("grade") or meta.get("reviewRating", {}).get("ratingValue", "")
+
+        resolution_state = item.get("resolutionIsApproved")
+        if resolution_state is True:
+            problem_status = "resolved"
+        elif resolution_state is False:
+            problem_status = "not_resolved"
+        else:
+            problem_status = ""
+
+        row = {
+            "url": review_url,
+            "review_date": review_date_value,
+            "user_name": meta.get("author", ""),
+            "user_city": "",
+            "user_city_full": "",
+            "review_title": title,
+            "review_text": review_text,
+            "review_status": "published",
+            "problem_status": problem_status,
+            "rating": rating,
+            "review_tag": "",
+            "bank_name": bank_name or "",
+            "is_bank_ans": bool(item.get("agentAnswerText")),
+            "review_id": review_id or "",
+        }
+        return row, False
+
+    def _normalize_text(self, value: str) -> str:
+        if not value:
+            return ""
+        normalized = re.sub(r"(?i)</p>", "\n", value)
+        normalized = re.sub(r"(?i)<br\s*/?>", "\n", normalized)
+        normalized = re.sub(r"<[^>]+>", " ", normalized)
+        normalized = unescape(normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def _parse_datetime(self, value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            logger.debug("Failed to parse banki.ru datetime value: %s", value)
+            return None
+
+    def _ensure_csv_filename(self, filename: str) -> str:
+        name = filename.strip()
+        if not name:
+            raise ParserServiceError("Output filename cannot be empty")
+        candidate = Path(name).name
+        if not candidate.lower().endswith(".csv"):
+            candidate = f"{candidate}.csv"
+        return candidate
+
+
 class ParserService:
     """Async wrapper around Sravni parser for use in FastAPI routes."""
 
     def __init__(self) -> None:
         self._sravni_parser = SravniParser()
+        self._banki_parser = BankiRuParser(self._sravni_parser.data_dir)
 
     @property
     def data_dir(self) -> Path:
@@ -340,6 +687,30 @@ class ParserService:
     ) -> ParseResult:
         return await asyncio.to_thread(
             self._sravni_parser.parse_gazprombank_reviews,
+            page_size,
+            max_pages,
+            start_date,
+            bank_slug,
+            bank_name,
+            output_filename,
+            finger_print,
+            delay_range,
+        )
+
+    async def parse_banki_ru_reviews(
+        self,
+        *,
+        page_size: int = 20,
+        max_pages: int = 200,
+        start_date: Optional[datetime] = None,
+        bank_slug: Optional[str] = None,
+        bank_name: Optional[str] = None,
+        output_filename: Optional[str] = None,
+        finger_print: Optional[str] = None,
+        delay_range: tuple[float, float] = (1.0, 2.0),
+    ) -> ParseResult:
+        return await asyncio.to_thread(
+            self._banki_parser.parse_reviews,
             page_size,
             max_pages,
             start_date,
