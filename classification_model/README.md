@@ -1,3 +1,5 @@
+https://huggingface.co/lockR/xlm-roberta-finance-multi-label-classification
+
 Для запуска
 
 ```bash
