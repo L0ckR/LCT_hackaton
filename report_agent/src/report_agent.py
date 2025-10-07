@@ -10,9 +10,9 @@ import asyncio
 
 load_dotenv()
 
-LLM_API_KEY = os.getenv('LLM_API_KEY')
-BASE_URL = os.getenv('LLM_BASE_URL')
-MODEL_NAME = os.getenv('MODEL_NAME')
+LLM_API_KEY = os.getenv('FOUNDATION_API_KEY')
+BASE_URL = os.getenv('FOUNDATION_API_BASE_URL')
+MODEL_NAME = os.getenv('FOUNDATION_CHAT_MODEL')
 class ReportJsonSchema(BaseModel):
     executive_summary: dict = Field(
         description="Сводка с ключевыми выводами и рекомендациями"
