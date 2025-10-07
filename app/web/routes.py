@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-
+from typing import List, Union, Dict, Any
 from app.api.dependencies import get_db, get_user_from_token
 from app.core.config import settings
 from app.core.security import create_access_token, get_password_hash
@@ -24,12 +24,16 @@ from app.db.session import SessionLocal
 from app.models.review import Review
 from app.models.user import User
 from app.models.widget import Widget
+from app.models.Chart import ChartRequest, ChartResponse, ChartItem
+
 from app.realtime import broadcast_refresh, dashboard_events
 from app.schemas.review import ReviewOut
 from app.schemas.widget import MetricType, VisualizationType
 from app.services.auth import authenticate_user
 from app.services.widgets import METRIC_MAP, compute_widget_value, timeseries_for_metric
 from app.tasks.import_reviews import import_reviews_task
+import httpx
+
 
 router = APIRouter(tags=["web"])
 ws_router = APIRouter()
@@ -382,3 +386,70 @@ async def dashboard_websocket(websocket: WebSocket):
         await websocket.close(code=1011)
     finally:
         db.close()
+
+@router.post("/generate-chart", response_model=ChartResponse)
+async def generate_report_via_agent(request: ChartRequest):
+    """
+    Проксирует запрос в chart generator для генерации графика.
+    """
+    # URL внутри Docker-сети
+    CHART_AGENT_URL = "http://dashboard-api:8003/generate-chart"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                CHART_AGENT_URL,
+                json={"data": request.data}
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка подключения к report-agent: {str(e)}"
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"report-agent вернул ошибку: {response.text}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Неожиданная ошибка: {str(e)}"
+        )
+
+
+@router.post("/generate-pdf-report")
+async def generate_pdf_report_via_agent(charts: List[ChartItem]):
+    """
+    Отправляет запрос в dashboard-builder-agent для генерации PDF-отчёта.
+    """
+    DASHBOARD_AGENT_URL = "http://report-api:8001/generate_report"
+
+    try:
+        payload = [chart.model_dump() for chart in charts]
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                DASHBOARD_AGENT_URL,
+                json=payload
+            )
+            response.raise_for_status()
+            return response.json()  
+
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка подключения к dashboard-builder-agent: {str(e)}"
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"dashboard-builder-agent вернул ошибку: {response.text}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Неожиданная ошибка: {str(e)}"
+        )

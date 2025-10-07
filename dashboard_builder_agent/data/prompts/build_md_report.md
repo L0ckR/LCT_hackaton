@@ -31,7 +31,6 @@
   "chart_type": "string",
   "columns": ["array", "of", "strings"],
   "metric_name": "string",
-  "aggregate_by": "string"
 }
 ```
 
@@ -40,7 +39,7 @@
 
 Выбери chart_type из доступных типов графиков
 
-Определи metric из доступных метрик
+Определи metric из доступных метрик по описанию
 
 Определи columns - поля для осей/группировки
 

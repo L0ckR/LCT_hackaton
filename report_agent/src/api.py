@@ -36,3 +36,4 @@ async def generate_report(charts: List[ChartItem]):
         raise HTTPException(status_code=400, detail=f"Ошибка парсинга JSON: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка генерации отчёта: {str(e)}")
+    
