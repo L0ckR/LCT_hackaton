@@ -78,7 +78,6 @@ class ReviewRow(BaseModel):
     review_title: str
     review_text: str
     review_status: str
-    problem_status: Union[str, bool]
     rating: Union[int, str]
     review_tag: str
     bank_name: str

@@ -54,7 +54,7 @@ pytest
     "source": "banki_ru",
     "start_date": "2024-01-01T00:00:00+00:00",
     "max_pages": 200,
-    "page_size": 20,
+    "page_size": 30,
     "min_delay": 1.0,
     "max_delay": 2.0,
     "output_filename": "banki_ru_reviews.csv"

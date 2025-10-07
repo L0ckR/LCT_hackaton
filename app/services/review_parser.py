@@ -9,9 +9,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from html import unescape
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import requests
+
+try:
+    from bs4 import BeautifulSoup  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    BeautifulSoup = None  # type: ignore
 
 try:
     from fake_useragent import UserAgent
@@ -123,6 +128,8 @@ class SravniParser:
         self._csv_writer = _CsvWriter(self.data_dir)
         self._user_agent_provider = _UserAgentProvider()
         self._session = requests.Session()
+        self._max_retries = 6
+        self._max_retries = 6
 
     def parse_gazprombank_reviews(
         self,
@@ -218,7 +225,6 @@ class SravniParser:
             "review_title",
             "review_text",
             "review_status",
-            "problem_status",
             "rating",
             "review_tag",
             "bank_name",
@@ -299,7 +305,6 @@ class SravniParser:
                     "review_title": item.get("title", ""),
                     "review_text": item.get("text", ""),
                     "review_status": item.get("ratingStatus", ""),
-                    "problem_status": item.get("problemSolved", ""),
                     "rating": item.get("rating", ""),
                     "review_tag": item.get("reviewTag", ""),
                     "bank_name": bank_name or "",
@@ -336,6 +341,7 @@ class BankiRuParser:
     _REVIEW_URL_TEMPLATE = (
         "https://www.banki.ru/services/responses/bank/{slug}/?id={review_id}"
     )
+    _DEFAULT_MAX_RETRIES = 6
 
     def __init__(self, data_dir: Optional[Path] = None) -> None:
         root_dir = Path(__file__).resolve().parents[2]
@@ -344,6 +350,7 @@ class BankiRuParser:
         self._csv_writer = _CsvWriter(self.data_dir)
         self._user_agent_provider = _UserAgentProvider()
         self._session = requests.Session()
+        self._max_retries = self._DEFAULT_MAX_RETRIES
 
     def parse_reviews(
         self,
@@ -372,13 +379,25 @@ class BankiRuParser:
         delay_min, delay_max = delay_range
         threshold = start_date.replace(tzinfo=None) if start_date else None
         parsed_rows: List[Dict[str, Any]] = []
+        skipped_pages: List[int] = []
 
         for page in range(1, max_pages + 1):
-            page_url = self._build_page_url(slug, page)
+            page_url = self._build_page_url(slug, page, page_size)
             logger.debug("Fetching banki.ru reviews page %s url=%s", page, page_url)
-            response = self._fetch_banki_page(page_url, slug, page)
+            try:
+                response = self._fetch_banki_page(page_url, slug, page)
+            except ParserServiceError as exc:
+                logger.error(
+                    "Skipping banki.ru page %s after repeated failures: %s",
+                    page,
+                    exc,
+                )
+                skipped_pages.append(page)
+                if delay_max > 0:
+                    time.sleep(random.uniform(delay_min, delay_max))
+                continue
 
-            items, has_more, ld_reviews = self._extract_page_payload(response.text)
+            items, has_more, ld_reviews, statuses = self._extract_page_payload(response.text)
             if not items:
                 logger.info("No review items returned on banki.ru page %s, stopping", page)
                 break
@@ -394,12 +413,14 @@ class BankiRuParser:
             page_rows: List[Dict[str, Any]] = []
             for index, item in enumerate(items):
                 meta = ld_reviews[index] if index < len(ld_reviews) else {}
+                status_text = statuses[index] if index < len(statuses) else ""
                 row, stop_row = self._build_row(
                     item=item,
                     meta=meta,
                     slug=slug,
                     bank_name=bank_name,
                     threshold=threshold,
+                    status_text=status_text,
                 )
                 if row:
                     page_rows.append(row)
@@ -438,39 +459,40 @@ class BankiRuParser:
             "review_title",
             "review_text",
             "review_status",
-            "problem_status",
             "rating",
             "review_tag",
             "bank_name",
             "is_bank_ans",
             "review_id",
         )
-        path = self._csv_writer.write(filename, headers, parsed_rows)
+        unique_rows = self._deduplicate_rows(parsed_rows)
+        path = self._csv_writer.write(filename, headers, unique_rows)
         logger.info(
             "Finished banki.ru reviews parsing for %s. Total reviews: %s",
             bank_name,
-            len(parsed_rows),
+            len(unique_rows),
         )
         return ParseResult(
             source="banki_ru",
             filename=filename,
             csv_path=path,
-            rows_written=len(parsed_rows),
+            rows_written=len(unique_rows),
             metadata={
                 "bank_slug": slug,
                 "bank_name": bank_name,
                 "start_date": start_date.isoformat() if start_date else None,
                 "max_pages": max_pages,
                 "page_size": page_size,
+                "skipped_pages": skipped_pages,
             },
-            rows=parsed_rows,
+            rows=unique_rows,
         )
 
-    def _build_page_url(self, slug: str, page: int) -> str:
+    def _build_page_url(self, slug: str, page: int, page_size: int) -> str:
         base = self._base_url(slug)
         if page <= 1:
-            return base
-        return f"{base}?page={page}"
+            return f"{base}?type=all&period=all&perPage={page_size}"
+        return f"{base}?page={page}&type=all&period=all&perPage={page_size}"
 
     def _base_url(self, slug: str) -> str:
         return self._BASE_URL_TEMPLATE.format(slug=slug)
@@ -486,8 +508,11 @@ class BankiRuParser:
         return headers
 
     def _fetch_banki_page(self, url: str, slug: str, page: int) -> requests.Response:
-        referer = self._base_url(slug)
-        for attempt in range(1, 4):
+        referer = f"{self._base_url(slug)}?type=all&period=all"
+        max_retries = getattr(self, "_max_retries", self._DEFAULT_MAX_RETRIES)
+        if not hasattr(self, "_max_retries"):
+            self._max_retries = max_retries
+        for attempt in range(1, max_retries + 1):
             try:
                 response = self._session.get(
                     url,
@@ -496,9 +521,10 @@ class BankiRuParser:
                 )
             except requests.RequestException as exc:
                 logger.warning(
-                    "banki.ru request error on page %s (attempt %s/3): %s",
+                    "banki.ru request error on page %s (attempt %s/%s): %s",
                     page,
                     attempt,
+                    max_retries,
                     exc,
                 )
                 time.sleep(5)
@@ -506,20 +532,37 @@ class BankiRuParser:
 
             if response.status_code == 429:
                 logger.warning(
-                    "Received HTTP 429 on banki.ru page %s (attempt %s/3), backing off for 60s",
+                    "Received HTTP 429 on banki.ru page %s (attempt %s/%s), backing off for 60s",
                     page,
                     attempt,
+                    max_retries,
                 )
                 time.sleep(60)
                 continue
-            if 500 <= response.status_code < 600:
+            if response.status_code == 403:
+                wait_seconds = min(180, 30 * attempt)
                 logger.error(
-                    "Received HTTP %s on banki.ru page %s (attempt %s/3)",
+                    "Received HTTP 403 on banki.ru page %s (attempt %s/%s). Retrying after %ss",
+                    page,
+                    attempt,
+                    max_retries,
+                    wait_seconds,
+                )
+                time.sleep(wait_seconds)
+                self._reset_session()
+                continue
+            if 500 <= response.status_code < 600:
+                wait_seconds = min(90, 10 * attempt)
+                logger.error(
+                    "Received HTTP %s on banki.ru page %s (attempt %s/%s). Retrying after %ss",
                     response.status_code,
                     page,
                     attempt,
+                    max_retries,
+                    wait_seconds,
                 )
-                time.sleep(5)
+                time.sleep(wait_seconds)
+                self._reset_session()
                 continue
             if response.status_code != 200:
                 message = (
@@ -533,10 +576,35 @@ class BankiRuParser:
         logger.error(message)
         raise ParserServiceError(message)
 
+    def _reset_session(self) -> None:
+        try:
+            self._session.close()
+        except Exception:  # pragma: no cover - defensive
+            pass
+        self._session = requests.Session()
+
+    def _deduplicate_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        seen_keys: set[tuple[Any, ...]] = set()
+        unique_rows: List[Dict[str, Any]] = []
+        for row in rows:
+            review_id = row.get("review_id")
+            if review_id:
+                key = ("id", review_id)
+            else:
+                key = ("content", row.get("review_date"), row.get("review_text"))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            unique_rows.append(row)
+        removed = len(rows) - len(unique_rows)
+        if removed:
+            logger.info("Removed %s duplicate reviews while merging results", removed)
+        return unique_rows
+
     def _extract_page_payload(
         self,
         html_content: str,
-    ) -> tuple[List[Dict[str, Any]], bool, List[Dict[str, Any]]]:
+    ) -> tuple[List[Dict[str, Any]], bool, List[Dict[str, Any]], List[str]]:
         options: Optional[Dict[str, Any]] = None
         for match in re.finditer(
             r'data-module-options=(?P<q>"|\')(?P<content>.*?)(?P=q)',
@@ -560,7 +628,8 @@ class BankiRuParser:
         items = responses.get("data") or []
         has_more = bool(responses.get("hasMorePages"))
         ld_reviews = self._extract_jsonld_reviews(html_content)
-        return items, has_more, ld_reviews
+        statuses = self._extract_status_badges(html_content, items)
+        return items, has_more, ld_reviews, statuses
 
     def _extract_jsonld_reviews(self, html_content: str) -> List[Dict[str, Any]]:
         reviews: List[Dict[str, Any]] = []
@@ -580,6 +649,44 @@ class BankiRuParser:
                 break
         return reviews
 
+    def _extract_status_badges(
+        self, html_content: str, items: Sequence[Dict[str, Any]]
+    ) -> List[str]:
+        if BeautifulSoup is None or not items:
+            return ["" for _ in items]
+        soup = BeautifulSoup(html_content, "html.parser")
+        result: List[str] = []
+        for item in items:
+            status_text = ""
+            review_id = item.get("id")
+            if review_id:
+                pattern = re.compile(rf"/services/responses/bank/.+\?id={review_id}(?:&|$)")
+                link = soup.find("a", href=pattern)
+                container = None
+                if link:
+                    container = link
+                    for _ in range(5):  # climb up a few levels to reach card root
+                        container = container.parent
+                        if container is None:
+                            break
+                        if container and container.name and container.name.lower() in {"article", "div", "section"}:
+                            # look for badge inside this container
+                            badge = container.find(
+                                string=re.compile(r"^Отзыв", re.IGNORECASE)
+                            )
+                            if badge:
+                                status_text = badge.strip()
+                                break
+                    # if not found, attempt secondary search within container divs
+                    if not status_text and container:
+                        for div in container.find_all("div"):
+                            text = (div.get_text() or "").strip()
+                            if text.startswith("Отзыв"):
+                                status_text = text
+                                break
+            result.append(status_text)
+        return result
+
     def _build_row(
         self,
         *,
@@ -588,6 +695,7 @@ class BankiRuParser:
         slug: str,
         bank_name: str,
         threshold: Optional[datetime],
+        status_text: str,
     ) -> tuple[Optional[Dict[str, Any]], bool]:
         review_id = item.get("id")
         date_raw = item.get("dateCreate") or ""
@@ -607,14 +715,7 @@ class BankiRuParser:
         review_text = self._normalize_text(description)
         title = item.get("title") or meta.get("name") or ""
         rating = item.get("grade") or meta.get("reviewRating", {}).get("ratingValue", "")
-
-        resolution_state = item.get("resolutionIsApproved")
-        if resolution_state is True:
-            problem_status = "resolved"
-        elif resolution_state is False:
-            problem_status = "not_resolved"
-        else:
-            problem_status = ""
+        status_text = self._infer_status_from_item(status_text, item)
 
         row = {
             "url": review_url,
@@ -624,8 +725,7 @@ class BankiRuParser:
             "user_city_full": "",
             "review_title": title,
             "review_text": review_text,
-            "review_status": "published",
-            "problem_status": problem_status,
+            "review_status": status_text,
             "rating": rating,
             "review_tag": "",
             "bank_name": bank_name or "",
@@ -633,6 +733,16 @@ class BankiRuParser:
             "review_id": review_id or "",
         }
         return row, False
+
+    def _infer_status_from_item(self, status_text: str, item: Dict[str, Any]) -> str:
+        if status_text:
+            return status_text
+        is_countable = item.get("isCountable")
+        if is_countable is True:
+            return "Отзыв проверен"
+        if is_countable is False:
+            return "Отзыв не зачтен"
+        return "Отзыв проверяется"
 
     def _normalize_text(self, value: str) -> str:
         if not value:
