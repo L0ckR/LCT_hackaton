@@ -1,39 +1,74 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 
 from app.api.dependencies import get_current_user
-from app.schemas.parser import ParseRequest, ParseResponse
-from app.services.review_parser import ParserError, extract_reviews
-
-logger = logging.getLogger(__name__)
+from app.schemas.parser import ParseJobRequest, ParseJobResult, ParserSource
+from app.services.review_parser import ParserService, ParserServiceError
 
 router = APIRouter(prefix="/parser", tags=["parser"])
 
-@router.post("/reviews", response_model=ParseResponse)
-async def parse_reviews_endpoint(
-    payload: ParseRequest,
-    user=Depends(get_current_user),
-) -> ParseResponse:
+logger = logging.getLogger(__name__)
+parser_service = ParserService()
 
-    logger.info(f"Количество страниц: {len(payload.pages)}")
-    
-    if not payload.pages:
-        logger.warning("Запрос не содержит страниц")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Payload must include at least one page",
-        )
 
+@router.post("/run", response_model=ParseJobResult)
+async def run_parser_job(job: ParseJobRequest, user=Depends(get_current_user)):
     try:
-        logger.info("Вызываем функцию extract_reviews")
-        reviews = await extract_reviews(payload.pages)
-        logger.info(f"Парсинг завершен. Найдено {len(reviews)} отзывов")
-    except ParserError as exc:
-        logger.error(f"Ошибка парсера: {exc}")
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.error(f"Неожиданная ошибка: {exc}")
-        raise HTTPException(status_code=500, detail="Internal server error") from exc
+        if job.source is ParserSource.GAZPROMBANK_SRAVNI:
+            result = await parser_service.parse_gazprombank_reviews(
+                page_size=job.page_size,
+                max_pages=job.max_pages,
+                start_date=job.start_date,
+                output_filename=job.output_filename,
+                finger_print=job.finger_print,
+                delay_range=(job.min_delay, job.max_delay),
+            )
+        elif job.source is ParserSource.BANKI_RU:
+            result = await parser_service.parse_banki_ru_reviews(
+                page_size=job.page_size,
+                max_pages=job.max_pages,
+                start_date=job.start_date,
+                output_filename=job.output_filename,
+                finger_print=job.finger_print,
+                delay_range=(job.min_delay, job.max_delay),
+            )
+        else:
+            raise ParserServiceError(f"Unsupported parser source: {job.source}")
+    except ParserServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc: 
+        logger.exception("Unexpected parser failure: %s", exc)
+        raise HTTPException(status_code=500, detail="Parser job failed") from exc
 
-    logger.info(f"Возвращаем {len(reviews)} отзывов пользователю")
-    return ParseResponse(reviews=reviews)
+    download_path = router.url_path_for(
+        "download_parser_file",
+        filename=result.filename,
+    )
+    return ParseJobResult(
+        source=ParserSource(result.source),
+        filename=result.filename,
+        csv_path=str(result.csv_path),
+        download_url=str(download_path),
+        rows_written=result.rows_written,
+        metadata=result.metadata,
+        rows=result.rows,
+    )
+
+
+@router.get(
+    "/files/{filename}",
+    response_class=FileResponse,
+    name="download_parser_file",
+)
+async def download_parser_file(filename: str, user=Depends(get_current_user)):
+    try:
+        path = parser_service.resolve_csv_path(filename)
+    except ParserServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(
+        path,
+        media_type="text/csv",
+        filename=path.name,
+    )
